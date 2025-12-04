@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools {
-        // Yêu cầu: Đã cài NodeJS tên 'NodeJS' trong Manage Jenkins -> Tools
+        // Đảm bảo tên này khớp với Global Tool Configuration
         nodejs 'NodeJS' 
     }
 
@@ -17,8 +17,7 @@ pipeline {
         stage('Security Check (OWASP)') {
             steps {
                 echo '--- 2. OWASP Dependency Check ---'
-                // QUAN TRỌNG: Bạn phải vào Manage Jenkins > Tools > Dependency-Check
-                // Bấm "Add Installer" -> chọn Version (ví dụ 9.0.9) thì bước này mới chạy được.
+                // Nhớ là đã bấm "Add Installer" cho tool này rồi nhé
                 dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
                                 odcInstallation: 'OWASP-Dependency-Check'
             }
@@ -31,34 +30,31 @@ pipeline {
 
         stage('Code Quality (SonarCloud)') {
             steps {
-                echo '--- 3. Static Analysis (SonarCloud) ---'
-                // Yêu cầu: Đã tạo System Configuration tên 'SonarCloud'
-                withSonarQubeEnv('SonarCloud') { 
-                    sh '''
-                    npx sonar-scanner \
-                        -Dsonar.projectKey=k22022002_jenkins-hello-world \
-                        -Dsonar.organization=k22022002 \
-                        -Dsonar.sources=src \
-                        -Dsonar.tests=test \
-                        -Dsonar.css.node=true \
-                        -Dsonar.host.url=https://sonarcloud.io
-			-Dsonar.nodejs.executable=$(which node)
-                    '''
-                }
-            }
-        }
+                script {
+                    echo '--- 3. Static Analysis (SonarCloud) ---'
+                    
+                    // BƯỚC SỬA LỖI:
+                    // 1. Dùng lệnh của Jenkins để lấy đường dẫn tuyệt đối của Node vừa được load
+                    def nodePath = sh(script: "which node", returnStdout: true).trim()
+                    echo "NodeJS path found: ${nodePath}"
 
-        // Tạm thời comment bước Quality Gate vì bạn đang chạy localhost
-        // SonarCloud không thể gọi ngược về máy bạn để báo kết quả được.
-        /*
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                    withSonarQubeEnv('SonarCloud') { 
+                        // 2. Dùng dấu nháy kép """ (Double Quotes) thay vì '''
+                        // Để chúng ta có thể chèn biến ${nodePath} vào lệnh
+                        sh """
+                        npx sonar-scanner \
+                            -Dsonar.projectKey=k22022002_jenkins-hello-world \
+                            -Dsonar.organization=k22022002 \
+                            -Dsonar.sources=src \
+                            -Dsonar.tests=test \
+                            -Dsonar.css.node=true \
+                            -Dsonar.host.url=https://sonarcloud.io \
+                            -Dsonar.nodejs.executable="${nodePath}"
+                        """
+                    }
                 }
             }
         }
-        */
 
         stage('Build & Test') {
             steps {
