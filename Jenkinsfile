@@ -42,6 +42,7 @@ pipeline {
                         -Dsonar.tests=test \
                         -Dsonar.css.node=true \
                         -Dsonar.host.url=https://sonarcloud.io
+			-Dsonar.nodejs.executable=$(which node)
                     '''
                 }
             }
