@@ -1,43 +1,81 @@
 pipeline {
-    agent any 
-    
-    // Khai báo các tools cần thiết (nếu server Jenkins đã cài sẵn Nodejs thì bỏ qua phần này)
+    agent any
+
     tools {
-        nodejs 'NodeJS' // Tên này phải khớp với tên bạn cấu hình trong Global Tool Configuration của Jenkins
+        nodejs 'NodeJS' // Tên tool NodeJS đã cấu hình
+        // Khai báo tool OWASP nếu dùng cú pháp tool (hoặc dùng step dependencyCheck bên dưới)
     }
 
     stages {
-        stage('Build') {
+        stage('Checkout & Install') {
             steps {
-                echo 'Building...'
-                // Cài đặt các thư viện phụ thuộc
-                sh 'npm install' 
+                echo '--- 1. Checkout & Install Dependencies ---'
+                // Checkout code (tự động nếu dùng Pipeline from SCM)
+                // Cài node_modules để có cái cho OWASP quét
+                sh 'npm install'
             }
         }
-        
-        stage('Test') {
+
+        stage('Security Check (OWASP)') {
             steps {
-                echo 'Testing...'
-                // Chạy file test đã viết ở trên
-                sh 'npm test' 
+                echo '--- 2. OWASP Dependency Check ---'
+                // Quét thư mục hiện tại (.). 
+                // odcFailBuildOnCVSS: 7.0 nghĩa là nếu tìm thấy lỗ hổng có điểm > 7 (High/Critical) thì Break Build ngay.
+                dependencyCheck additionalArguments: '--format HTML --format XML ', 
+                                odcInstallation: 'OWASP-Dependency-Check', // Tên đặt trong Global Tools
+                                odcFailBuildOnCVSS: 7.0 
+            }
+            post {
+                always {
+                    // Lưu lại report để xem trên giao diện Jenkins
+                    dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+                }
             }
         }
-        
-        stage('Deploy') {
+
+        stage('Code Quality (SonarQube)') {
             steps {
-                echo 'Deploying...'
-                // Giả lập bước deploy
-                sh 'echo "Deploy thành công!"' 
+                echo '--- 3. Static Analysis (SonarQube) ---'
+                // 'SonarQube-Server' là tên bạn đặt trong Manage Jenkins > System
+                withSonarQubeEnv('SonarQube-Server') { 
+                    // Lệnh chạy scanner. Yêu cầu trong root project có file sonar-project.properties hoặc truyền tham số trực tiếp
+                    sh '''
+                    npx sonar-scanner \
+                        -Dsonar.projectKey=jenkins-hello-world \
+                        -Dsonar.sources=src \
+                        -Dsonar.tests=test \
+                        -Dsonar.css.node=true
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                echo '--- 4. Checking Quality Gate ---'
+                // Chờ SonarQube trả kết quả về. 
+                // Nếu trạng thái là FAILED (không đạt tiêu chuẩn) -> abortPipeline: true sẽ Break Build.
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                echo '--- 5. Build & Test (Only runs if Security & Quality passed) ---'
+                // Chỉ chạy đến đây nếu không có lỗ hổng bảo mật và code sạch đẹp
+                sh 'npm test'
             }
         }
     }
-    
+
     post {
-        always {
-            echo 'Pipeline đã chạy xong.'
-        }
         failure {
-            echo 'Có lỗi xảy ra trong quá trình build/test.'
+            echo '❌ Pipeline đã bị chặn lại do lỗi Bảo mật hoặc Chất lượng Code không đạt!'
+        }
+        success {
+            echo '✅ Chúc mừng! Code sạch, an toàn và chạy tốt.'
         }
     }
 }
