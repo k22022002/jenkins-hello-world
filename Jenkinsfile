@@ -19,15 +19,13 @@ pipeline {
         stage('Security Check (OWASP)') {
             steps {
                 echo '--- 2. OWASP Dependency Check ---'
-                // Quét thư mục hiện tại (.). 
-                // odcFailBuildOnCVSS: 7.0 nghĩa là nếu tìm thấy lỗ hổng có điểm > 7 (High/Critical) thì Break Build ngay.
-                dependencyCheck additionalArguments: '--format HTML --format XML ', 
-                                odcInstallation: 'OWASP-Dependency-Check', // Tên đặt trong Global Tools
-                                odcFailBuildOnCVSS: 7.0 
+                // Sửa lại đoạn này:
+                dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
+                                odcInstallation: 'OWASP-Dependency-Check'
             }
             post {
                 always {
-                    // Lưu lại report để xem trên giao diện Jenkins
+                    // Lưu report lại dù build có fail hay pass
                     dependencyCheckPublisher pattern: 'dependency-check-report.xml'
                 }
             }
