@@ -1,0 +1,11 @@
+{
+  "name": "jenkins-hello-world",
+  "version": "1.0.0",
+  "description": "Simple project for Jenkins testing",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node test/test.js"
+  },
+  "author": "",
+  "license": "ISC"
+}
