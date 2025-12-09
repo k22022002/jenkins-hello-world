@@ -125,22 +125,19 @@ pipeline {
         stage('7. Digital Signature (SLSA L2)') {
             steps {
                 script {
-		echo '--- [SLSA L2] Signing Artifact ---'
+		    echo '--- [SLSA L2] Signing Artifact ---'
                     withEnv(['COSIGN_PASSWORD=my-secure-password']) {
                         // 1. Tạo key nếu chưa có
                         sh 'if [ ! -f cosign.key ]; then cosign generate-key-pair; fi'
 
-                        // 2. Ký file (FIX LỖI: Thêm --bundle)
-                        // --bundle cosign.bundle: Tạo file bundle để thỏa mãn yêu cầu của Cosign v2
-                        // --tlog-upload=false: Không upload lên log công khai (vì dùng key nội bộ)
-                        // > ${SIGNATURE_FILE}: Vẫn xuất chữ ký riêng ra file .sig để dễ verify theo cách cũ
-                        
+                        // 2. Ký file (FIX LỖI: Dùng --output-signature thay vì >)
                         sh """
                         cosign sign-blob --yes \
                             --key cosign.key \
                             --bundle cosign.bundle \
                             --tlog-upload=false \
-                            ${ARTIFACT_NAME} > ${SIGNATURE_FILE}
+                            --output-signature ${SIGNATURE_FILE} \
+                            ${ARTIFACT_NAME}
                         """
                     }
                     echo "Artifact signed successfully."
@@ -149,8 +146,9 @@ pipeline {
     }
     }
     post {
-        success {
-            archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, cosign.pub, dependency-check-report.html", allowEmptyArchive: true
+	success {
+            // Thêm cosign.bundle vào danh sách artifacts
+            archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, cosign.pub, cosign.bundle, dependency-check-report.html", allowEmptyArchive: true
             echo "SUCCESS: Pipeline finished."
         }
         failure {
