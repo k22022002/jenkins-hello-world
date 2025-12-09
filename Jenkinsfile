@@ -125,22 +125,23 @@ pipeline {
         stage('7. Digital Signature (SLSA L2)') {
             steps {
                 script {
-                    echo '--- [SLSA L2] Signing Artifact ---'
+		    echo '--- [SLSA L2] Signing Artifact ---'
                     withEnv(['COSIGN_PASSWORD=my-secure-password']) {
-                        // Tạo key nếu chưa có (lưu ý: key này sẽ bị xóa ở lần build sau do cleanWs)
-                        // Trong thực tế, bạn nên copy key từ Jenkins Credential vào đây thay vì generate mới
+                        // 1. Tạo key nếu chưa có
                         sh 'if [ ! -f cosign.key ]; then cosign generate-key-pair; fi'
 
+                        // 2. Ký file (SỬA LỖI Ở ĐÂY)
+                        // - Bỏ bớt flag --output-signature (gây lỗi)
+                        // - Bỏ bớt flag --tlog-upload=false (đôi khi gây xung đột, Cosign dùng key local thường tự hiểu)
+                        // - Dùng dấu > để lưu chữ ký. 
+                        // - Cosign sign-blob mặc định in chữ ký ra stdout (màn hình) và log ra stderr, 
+                        //   nên dùng > sẽ chỉ lấy đúng phần chữ ký.
+                        
                         sh """
-                        cosign sign-blob --yes \
-                            --key cosign.key \
-                            --tlog-upload=false \
-                            --output-signature ${SIGNATURE_FILE} \
-                            ${ARTIFACT_NAME}
+                        cosign sign-blob --yes --key cosign.key ${ARTIFACT_NAME} > ${SIGNATURE_FILE}
                         """
                     }
-                    echo "Artifact signed."
-                }
+                    echo "Artifact signed successfully."                }
             }
         }
     }
