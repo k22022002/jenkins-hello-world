@@ -147,7 +147,7 @@ pipeline {
             }
         }
     }
-
+    }
     post {
         success {
             archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, cosign.pub, dependency-check-report.html", allowEmptyArchive: true
