@@ -125,23 +125,25 @@ pipeline {
         stage('7. Digital Signature (SLSA L2)') {
             steps {
                 script {
-		    echo '--- [SLSA L2] Signing Artifact ---'
+		echo '--- [SLSA L2] Signing Artifact ---'
                     withEnv(['COSIGN_PASSWORD=my-secure-password']) {
                         // 1. Tạo key nếu chưa có
                         sh 'if [ ! -f cosign.key ]; then cosign generate-key-pair; fi'
 
-                        // 2. Ký file (SỬA LỖI Ở ĐÂY)
-                        // - Bỏ bớt flag --output-signature (gây lỗi)
-                        // - Bỏ bớt flag --tlog-upload=false (đôi khi gây xung đột, Cosign dùng key local thường tự hiểu)
-                        // - Dùng dấu > để lưu chữ ký. 
-                        // - Cosign sign-blob mặc định in chữ ký ra stdout (màn hình) và log ra stderr, 
-                        //   nên dùng > sẽ chỉ lấy đúng phần chữ ký.
+                        // 2. Ký file (FIX LỖI: Thêm --bundle)
+                        // --bundle cosign.bundle: Tạo file bundle để thỏa mãn yêu cầu của Cosign v2
+                        // --tlog-upload=false: Không upload lên log công khai (vì dùng key nội bộ)
+                        // > ${SIGNATURE_FILE}: Vẫn xuất chữ ký riêng ra file .sig để dễ verify theo cách cũ
                         
                         sh """
-                        cosign sign-blob --yes --key cosign.key ${ARTIFACT_NAME} > ${SIGNATURE_FILE}
+                        cosign sign-blob --yes \
+                            --key cosign.key \
+                            --bundle cosign.bundle \
+                            --tlog-upload=false \
+                            ${ARTIFACT_NAME} > ${SIGNATURE_FILE}
                         """
                     }
-                    echo "Artifact signed successfully."                }
+                    echo "Artifact signed successfully."
             }
         }
     }
