@@ -2,46 +2,42 @@ pipeline {
     agent any
 
     environment {
-        // Định nghĩa tên Artifact và File chứng thực
         ARTIFACT_NAME = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
-        
-        // Demo: Mật khẩu cho Key ký số (Trong thực tế hãy dùng Jenkins Credentials)
+        // Password giả lập cho Cosign
         COSIGN_PASSWORD = "my-secure-password" 
     }
 
     tools {
         nodejs 'NodeJS' 
-        // Lưu ý: Máy Jenkins cần cài sẵn 'jq' và 'cosign' trong PATH hệ thống
     }
 
     stages {
-        stage('1. Checkout & Init') {
+        stage('1. Checkout & Clean') {
             steps {
-                echo '--- [Prep] Checkout Code ---'
+                echo '--- [Prep] Cleaning Workspace & Checkout ---'
+                // QUAN TRỌNG: Xóa sạch rác của lần build trước (bao gồm cosign.key cũ)
+                // Nếu không có lệnh này, Gitleaks sẽ quét thấy key cũ và báo lỗi
+                cleanWs() 
+                
                 checkout scm
                 sh 'npm install'
             }
         }
-
-        // --- DSOMM Level 2: Enhanced Security Scanning ---
         
         stage('2. Advanced Secret Scanning (DSOMM L2)') {
             steps {
-                echo '--- [DSOMM L2] Deep Secret Detection with Gitleaks ---'
+                echo '--- [DSOMM L2] Deep Secret Detection ---'
                 script {
-                    // Sử dụng Docker để chạy Gitleaks - quét sâu tìm password/key
-                    // -v $(pwd):/path: Mount thư mục code hiện tại vào trong container
-                    // --source="/path": Bảo Gitleaks quét thư mục đó
-                    // --no-git: Quét file hệ thống thay vì lịch sử git (đôi khi jenkins checkout dạng detached head)
+                    // Quét code hiện tại. Vì đã cleanWs() nên sẽ không còn cosign.key cũ
                     try {
                         sh 'docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect --source="/path" -v --no-git'
                     } catch (Exception e) {
-                        // DSOMM L2 yêu cầu chặn Build nếu lộ secret. 
-                        // Tuy nhiên để bạn test chạy mượt, tôi set currentBuild.result thay vì error()
-                        echo "ALARM: Gitleaks found potential secrets!"
-                        currentBuild.result = 'UNSTABLE' 
+                        echo "ALARM: Gitleaks found secrets!"
+                        // Đánh dấu thất bại nếu tìm thấy secret thật sự trong code source
+                        currentBuild.result = 'FAILURE'
+                        error("Pipeline stopped due to secret detection.")
                     }
                 }
             }
@@ -63,7 +59,7 @@ pipeline {
         stage('4. SAST - Code Quality (DSOMM L1)') {
             steps {
                 script {
-                    echo '--- [DSOMM] Static Application Security Testing ---'
+                    echo '--- [DSOMM] Static Analysis ---'
                     def nodePath = sh(script: "which node", returnStdout: true).trim()
                     withSonarQubeEnv('SonarCloud') { 
                         sh """
@@ -81,29 +77,29 @@ pipeline {
             }
         }
 
-        // --- SLSA v1.2 Level 2: Authenticated Provenance ---
-
         stage('5. Build Artifact (SLSA Build)') {
             steps {
                 echo '--- [SLSA] Build Immutable Artifact ---'
-		sh 'rm -f *.tgz *.sig'
-                sh 'npm test'
-                sh "npm pack"
-		sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
+                script {
+                    // Dọn dẹp cục bộ để đảm bảo npm pack lấy đúng file
+                    sh 'rm -f *.tgz *.sig' 
+                    sh 'npm test'
+                    sh "npm pack"
+                    // Di chuyển file tgz vừa tạo thành tên chuẩn
+                    sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
+                }
             }
         }
 
-        stage('6. Generate Provenance with jq (SLSA)') {
+        stage('6. Generate Provenance (SLSA)') {
             steps {
                 script {
-                    echo '--- [SLSA] Generating Provenance using jq ---'
-                    
+                    echo '--- [SLSA] Generating Provenance ---'
                     def artifactSha256 = sh(script: "sha256sum ${ARTIFACT_NAME} | awk '{print \$1}'", returnStdout: true).trim()
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
                     def gitUrl = sh(script: "git config --get remote.origin.url", returnStdout: true).trim()
-                    def buildId = env.BUILD_TAG // Biến môi trường có sẵn của Jenkins
+                    def buildId = env.BUILD_TAG
 
-                    // Dùng JQ để tạo JSON chuẩn chỉnh, không lo lỗi syntax
                     sh """
                         jq -n \
                         --arg builder "Jenkins-CI" \
@@ -122,7 +118,6 @@ pipeline {
                             subject: [{ name: \$artifact, digest: { sha256: \$sha256 } }]
                         }' > ${PROVENANCE_FILE}
                     """
-                    echo "Provenance generated successfully."
                 }
             }
         }
@@ -130,17 +125,21 @@ pipeline {
         stage('7. Digital Signature (SLSA L2)') {
             steps {
                 script {
-                    echo '--- [SLSA L2] Signing Artifact with Cosign ---'
-                    
-                    // BƯỚC GIẢ LẬP: Tạo cặp key tạm thời để demo (Artifact Signing)
-                    // Trong PROD: Bạn sẽ lưu private key trong Jenkins Credentials
-                    sh 'cosign generate-key-pair' 
+                    echo '--- [SLSA L2] Signing Artifact ---'
+                    withEnv(['COSIGN_PASSWORD=my-secure-password']) {
+                        // Tạo key nếu chưa có (lưu ý: key này sẽ bị xóa ở lần build sau do cleanWs)
+                        // Trong thực tế, bạn nên copy key từ Jenkins Credential vào đây thay vì generate mới
+                        sh 'if [ ! -f cosign.key ]; then cosign generate-key-pair; fi'
 
-                    // Ký vào file Artifact (.tgz)
-                    // Kết quả tạo ra file chữ ký (mặc định in ra stdout, ta lưu vào file .sig)
-                    sh "cosign sign-blob --yes --key cosign.key --tlog-upload=false --output-signature ${SIGNATURE_FILE} ${ARTIFACT_NAME}"
-                    
-                    echo "Artifact signed. Signature saved to ${SIGNATURE_FILE}"
+                        sh """
+                        cosign sign-blob --yes \
+                            --key cosign.key \
+                            --tlog-upload=false \
+                            --output-signature ${SIGNATURE_FILE} \
+                            ${ARTIFACT_NAME}
+                        """
+                    }
+                    echo "Artifact signed."
                 }
             }
         }
@@ -148,9 +147,8 @@ pipeline {
 
     post {
         success {
-            // Lưu trữ Artifact, Provenance, Key công khai (để verify) và Chữ ký
             archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, cosign.pub, dependency-check-report.html", allowEmptyArchive: true
-            echo "SUCCESS: Pipeline completed DSOMM L2 & SLSA L2 requirements."
+            echo "SUCCESS: Pipeline finished."
         }
         failure {
             echo "Pipeline failed."
