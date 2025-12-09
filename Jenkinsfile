@@ -136,7 +136,7 @@ pipeline {
 
                     // Ký vào file Artifact (.tgz)
                     // Kết quả tạo ra file chữ ký (mặc định in ra stdout, ta lưu vào file .sig)
-                    sh "cosign sign-blob --key cosign.key --tlog-upload=false ${ARTIFACT_NAME} > ${SIGNATURE_FILE}"
+                    sh "cosign sign-blob --yes --key cosign.key --tlog-upload=false --output-signature ${SIGNATURE_FILE} ${ARTIFACT_NAME}"
                     
                     echo "Artifact signed. Signature saved to ${SIGNATURE_FILE}"
                 }
