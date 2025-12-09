@@ -86,8 +86,10 @@ pipeline {
         stage('5. Build Artifact (SLSA Build)') {
             steps {
                 echo '--- [SLSA] Build Immutable Artifact ---'
+		sh 'rm -f *.tgz *.sig'
                 sh 'npm test'
-                sh "npm pack && mv *.tgz ${ARTIFACT_NAME}"
+                sh "npm pack"
+		sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
             }
         }
 
