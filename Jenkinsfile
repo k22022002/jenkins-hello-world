@@ -26,6 +26,10 @@ pipeline {
                     echo '--- [Step 1] Installing Git & Tools ---'
                     sh 'apk add --no-cache git curl jq docker-cli openjdk17-jre'
                     
+                    // [FIX LỖI GIT OWNERSHIP TẠI ĐÂY]
+                    // Cho phép git chạy dưới quyền root trên thư mục của user jenkins
+                    sh "git config --global --add safe.directory '*'"
+                    
                     echo '--- [Step 2] Manual Checkout ---'
                     checkout scm
                     
@@ -81,11 +85,9 @@ pipeline {
                 script {
                     echo '--- [SLSA] Hermetic Build ---'
                     
-                    // [ĐÃ SỬA LỖI TẠI ĐÂY]
-                    // Chỉ xóa file rác cụ thể, KHÔNG dùng *.json để tránh xóa mất package.json
+                    // Xóa file cũ cẩn thận, tránh xóa nhầm package.json
                     sh "rm -f ${ARTIFACT_NAME} ${SIGNATURE_FILE} ${PROVENANCE_FILE}"
                     
-                    // Bây giờ lệnh này sẽ chạy thành công vì package.json vẫn còn
                     sh 'npm test'
                     sh 'npm pack'
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
@@ -98,7 +100,10 @@ pipeline {
             steps {
                 script {
                     echo '--- [SLSA L3] Generating Non-falsifiable Provenance ---'
+                    
+                    // Lệnh này bây giờ sẽ chạy thành công nhờ fix ở Stage 1
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+                    
                     def gitUrl = sh(script: "git config --get remote.origin.url", returnStdout: true).trim()
                     def builderId = "https://jenkins.your-company.com/agents/docker-node-20"
                     
