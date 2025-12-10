@@ -21,7 +21,7 @@ pipeline {
         COSIGN_PWD = credentials('cosign-password-id') 
         
         // Cấu hình SonarQube token an toàn
-        SONAR_TOKEN = credentials('sonar-token-id') 
+	SONAR_TOKEN = credentials('sonarcloud-token')
     }
 
     stages {
