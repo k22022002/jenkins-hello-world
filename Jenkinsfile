@@ -58,11 +58,18 @@ pipeline {
                     steps {
                         script {
                             echo '--- [SAST] SonarQube Scan & Wait ---'
+                            
+                            // Xóa cache cũ để tránh lỗi xung đột Java
+                            sh 'rm -rf .scannerwork .sonarqube'
+
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
                             
                             withSonarQubeEnv('SonarCloud') {
+                                // [FIX LỖI QUAN TRỌNG]: 
+                                // Đổi 'sonar-scanner' thành 'sonarqube-scanner' (Gói mới nhất)
+                                // Gói cũ (sonar-scanner) bị lỗi NullPointer với Java 17
                                 sh """
-                                    npx sonar-scanner \
+                                    npx sonarqube-scanner \
                                     -Dsonar.projectKey=k22022002_jenkins-hello-world \
                                     -Dsonar.organization=k22022002 \
                                     -Dsonar.sources=src \
@@ -82,14 +89,12 @@ pipeline {
                 script {
                     echo '--- [SLSA] Hermetic Build ---'
                     
-                    // [FIX LỖI MV]
-                    // Xóa TOÀN BỘ file .tgz cũ để tránh lệnh mv bị nhầm lẫn với artifact của build trước
+                    // [FIX LỖI MV] Xóa file cũ
                     sh "rm -f *.tgz *.sig ${PROVENANCE_FILE}"
                     
                     sh 'npm test'
                     sh 'npm pack'
                     
-                    // Bây giờ chỉ còn duy nhất 1 file tgz mới tạo, lệnh mv sẽ chạy đúng
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
                     
                     env.ARTIFACT_HASH = sh(script: "sha256sum ${ARTIFACT_NAME} | awk '{print \$1}'", returnStdout: true).trim()
