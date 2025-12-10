@@ -141,7 +141,7 @@ pipeline {
             steps {
                 script {
                     echo '--- [SLSA L3] Signing with Cosign ---'
-                    sh 'curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"'
+		    sh 'curl -O -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64"'
                     sh 'mv cosign-linux-amd64 /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign'
 
                     withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
