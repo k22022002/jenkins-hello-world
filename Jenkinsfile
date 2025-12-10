@@ -167,7 +167,7 @@ pipeline {
                     }
 
                     // Trả quyền file cho user Jenkins (UID 1000)
-                    sh 'chown -R 1000:1000 .'
+                    sh 'chmod -R 777 .'
                 }
             }
         }
