@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:20' 
-            args '-u root:root --entrypoint=""'   
+            args '-u root:root --entrypoint="" -m 2g'   
         }
     }
 
@@ -29,14 +29,18 @@ pipeline {
                     cleanWs()
                     echo '--- [Step] Set up job & Checkout code ---'
                     
-                    // SỬA DÒNG NÀY:
-                    // 1. Thêm export DEBIAN_FRONTEND=noninteractive để tránh bị treo khi cài đặt
-                    // 2. Thêm --no-install-recommends để cài nhẹ hơn
-                    sh '''
+                    // SỬA LẠI ĐOẠN NÀY:
+                    // Dùng dấu \ để xuống dòng cho dễ nhìn, và thêm && để nối lệnh
+                    sh """
                         export DEBIAN_FRONTEND=noninteractive
-                        apt-get update
-                        apt-get install -y --no-install-recommends git curl jq openjdk-17-jre docker.io
-                    '''
+                        apt-get update && \
+                        apt-get install -y --no-install-recommends \
+                            git \
+                            curl \
+                            jq \
+                            openjdk-17-jre \
+                            docker.io
+                    """
                     
                     sh "git config --global --add safe.directory '*'"
                     checkout scm
