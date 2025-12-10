@@ -6,7 +6,7 @@ pipeline {
 
             image 'node:20' 
 	    reuseNode true
-            args '-u root:root -v /var/run/docker.sock:/var/run/docker.sock'    
+            args '--entrypoint="" -u root:root -v /var/run/docker.sock:/var/run/docker.sock'    
         }
 
     }
