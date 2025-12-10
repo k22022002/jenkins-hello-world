@@ -28,7 +28,7 @@ pipeline {
                     checkout scm
                     
                     // Dùng npm install (vì repo chưa có package-lock.json chuẩn)
-                    sh 'npm install' 
+                    sh 'npm ci' 
                 }
             }
         }
