@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:20-alpine' 
-            args '-u root:root --entrypoint="" -m 2g'   
+            args '-u root:root --entrypoint=""'   
         }
     }
 
@@ -27,20 +27,12 @@ pipeline {
             steps {
                 script {
                     cleanWs()
-                    echo '--- [Step] Set up job & Checkout code ---'
+                    echo '--- [Step] Set up job & Checkout code (Alpine) ---'
                     
-                    // SỬA LẠI ĐOẠN NÀY:
-                    // Dùng dấu \ để xuống dòng cho dễ nhìn, và thêm && để nối lệnh
-                    sh """
-                        export DEBIAN_FRONTEND=noninteractive
-                        apt-get update && \
-                        apt-get install -y --no-install-recommends \
-                            git \
-                            curl \
-                            jq \
-                            openjdk-17-jre \
-                            docker.io
-                    """
+                    // 3. Thay lệnh apt-get bằng APK (của Alpine)
+                    // --no-cache: Không lưu rác, cài xong xóa cache luôn (nhanh)
+                    // libc6-compat: Cần thiết để chạy các tool như SonarScanner/Cosign trên Alpine
+                    sh 'apk add --no-cache git curl jq openjdk17-jre docker-cli libc6-compat'
                     
                     sh "git config --global --add safe.directory '*'"
                     checkout scm
