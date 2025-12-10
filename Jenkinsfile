@@ -15,7 +15,7 @@ pipeline {
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
         
-	COSIGN_PASSWORD = credentials('cosign-password-id')
+        COSIGN_PASSWORD = credentials('cosign-password-id') 
         SONAR_TOKEN = credentials('sonarcloud-token') 
     }
 
@@ -25,9 +25,6 @@ pipeline {
                 script {
                     echo '--- [Step 1] Installing Git & Tools ---'
                     sh 'apk add --no-cache git curl jq docker-cli openjdk17-jre'
-                    
-                    // [FIX LỖI GIT OWNERSHIP TẠI ĐÂY]
-                    // Cho phép git chạy dưới quyền root trên thư mục của user jenkins
                     sh "git config --global --add safe.directory '*'"
                     
                     echo '--- [Step 2] Manual Checkout ---'
@@ -85,12 +82,16 @@ pipeline {
                 script {
                     echo '--- [SLSA] Hermetic Build ---'
                     
-                    // Xóa file cũ cẩn thận, tránh xóa nhầm package.json
-                    sh "rm -f ${ARTIFACT_NAME} ${SIGNATURE_FILE} ${PROVENANCE_FILE}"
+                    // [FIX LỖI MV]
+                    // Xóa TOÀN BỘ file .tgz cũ để tránh lệnh mv bị nhầm lẫn với artifact của build trước
+                    sh "rm -f *.tgz *.sig ${PROVENANCE_FILE}"
                     
                     sh 'npm test'
                     sh 'npm pack'
+                    
+                    // Bây giờ chỉ còn duy nhất 1 file tgz mới tạo, lệnh mv sẽ chạy đúng
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
+                    
                     env.ARTIFACT_HASH = sh(script: "sha256sum ${ARTIFACT_NAME} | awk '{print \$1}'", returnStdout: true).trim()
                 }
             }
@@ -101,9 +102,7 @@ pipeline {
                 script {
                     echo '--- [SLSA L3] Generating Non-falsifiable Provenance ---'
                     
-                    // Lệnh này bây giờ sẽ chạy thành công nhờ fix ở Stage 1
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
-                    
                     def gitUrl = sh(script: "git config --get remote.origin.url", returnStdout: true).trim()
                     def builderId = "https://jenkins.your-company.com/agents/docker-node-20"
                     
@@ -141,7 +140,8 @@ pipeline {
             steps {
                 script {
                     echo '--- [SLSA L3] Signing with Cosign ---'
-		    sh 'curl -O -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64"'
+                    
+                    sh 'curl -O -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64"'
                     sh 'mv cosign-linux-amd64 /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign'
 
                     withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
@@ -160,7 +160,9 @@ pipeline {
                                 ${PROVENANCE_FILE}
                         """
                     }
-		sh 'chown -R 1000:1000 .'
+
+                    // Trả quyền file cho user Jenkins (UID 1000)
+                    sh 'chown -R 1000:1000 .'
                 }
             }
         }
