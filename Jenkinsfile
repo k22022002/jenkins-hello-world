@@ -2,6 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:18-alpine' 
+            // Mount docker socket và chạy dưới quyền root
             args '-u root:root' 
         }
     }
@@ -21,10 +22,12 @@ pipeline {
             steps {
                 script {
                     echo '--- [Prep] Environment Setup ---'
-                    // [FIX LỖI 1] Cài thêm 'openjdk17-jre' vì SonarScanner cần Java để chạy
+                    // Cài Java (cho SonarScanner) và các tools cần thiết
                     sh 'apk add --no-cache git curl jq docker-cli openjdk17-jre'
                     
                     checkout scm
+                    
+                    // Dùng npm install thay vì npm ci (vì chưa có package-lock.json)
                     sh 'npm ci' 
                 }
             }
@@ -35,6 +38,7 @@ pipeline {
                 script {
                     echo '--- [DSOMM L3] Trivy Filesystem Scan ---'
                     sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
+                    // Quét bảo mật
                     sh 'trivy fs --exit-code 1 --severity CRITICAL --no-progress .'
                 }
             }
@@ -52,17 +56,21 @@ pipeline {
                     steps {
                         script {
                             echo '--- [SAST] SonarQube Scan & Wait ---'
+                            
+                            // [FIX LỖI QUAN TRỌNG]: Lấy đường dẫn Node.js
+                            def nodePath = sh(script: "which node", returnStdout: true).trim()
+                            echo "Node.js path detected: ${nodePath}"
+                            
                             withSonarQubeEnv('SonarCloud') {
-                                // [FIX LỖI 2] Đã xóa dòng -Dsonar.login=${SONAR_TOKEN}
-                                // Scanner sẽ tự động đọc biến môi trường SONAR_TOKEN ở trên.
-                                // Đã thêm Java vào bước 1 nên lỗi Permission denied sẽ hết.
+                                // Truyền nodePath vào tham số -Dsonar.nodejs.executable
                                 sh """
                                     npx sonar-scanner \
                                     -Dsonar.projectKey=k22022002_jenkins-hello-world \
                                     -Dsonar.organization=k22022002 \
                                     -Dsonar.sources=src \
                                     -Dsonar.host.url=https://sonarcloud.io \
-                                    -Dsonar.qualitygate.wait=true
+                                    -Dsonar.qualitygate.wait=true \
+                                    -Dsonar.nodejs.executable="${nodePath}"
                                 """
                             }
                         }
