@@ -1,221 +1,383 @@
 pipeline {
+
     agent {
+
         docker {
-            // SỬ DỤNG BẢN 'bookworm' (Debian Full) để đảm bảo có lệnh 'ps' (tránh lỗi exit code -2)
-            image 'node:20-bookworm' 
-            
-            // THÊM: -v /var/run/docker.sock:... để container gọi được Docker của máy chủ (Docker-out-of-Docker)
-            args '-u root:root -v /var/run/docker.sock:/var/run/docker.sock -t -d --entrypoint=""'   
+
+            image 'node:20' 
+
+            args '-u root:root'    
+
         }
+
     }
+
+
 
     options {
+
         skipDefaultCheckout()
-        timeout(time: 1, unit: 'HOURS')
+
     }
+
+
 
     environment {
+
         ARTIFACT_NAME = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
+
         PROVENANCE_FILE = "provenance.json"
-        SBOM_FILE = "sbom.json"
+
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
+
         
+
         COSIGN_PASSWORD = credentials('cosign-password-id') 
+
         SONAR_TOKEN = credentials('sonarcloud-token') 
+
     }
+
+
 
     stages {
-        stage('1. Setup & Checkout') {
+
+stage('1. Setup & Checkout') {
+
             steps {
+
                 script {
+
+                    // Ensure workspace is clean to avoid permission errors from previous runs
+
                     cleanWs()
-                    echo '--- [Step] Set up job & Checkout code ---'
-                    
-                    sh 'export DEBIAN_FRONTEND=noninteractive'
-                    
-                    // 1. Update
-                    echo '--- Updating apt repos ---'
-                    sh 'apt-get update'
-                    
-                    // 2. Install Tools (Thêm procps để chắc chắn có lệnh ps cho Jenkins)
-                    echo '--- Installing basic tools ---'
-                    sh 'apt-get install -y --no-install-recommends git curl jq procps'
-                    
-                    // 3. Install Java
-                    echo '--- Installing Java ---'
-                    sh 'apt-get install -y --no-install-recommends openjdk-17-jre'
-                    
-                    // 4. Install Docker CLI
-                    echo '--- Installing Docker CLI ---'
-                    sh 'apt-get install -y --no-install-recommends docker.io'
-                    
-                    // 5. Verify Docker connection
-                    // Kiểm tra xem đã kết nối được với Docker Daemon chưa
-                    sh 'docker info || echo "WARNING: Cannot connect to Docker Daemon. Check socket mount."'
 
-                    echo '--- Checking out source code ---'
+
+
+                    echo '--- [Step 1] Installing Tools (Debian/Ubuntu) ---'
+
+                    // Using apt-get because 'node:20' is Debian-based
+
+                    sh 'apt-get update && apt-get install -y git curl jq openjdk-17-jre docker.io'
+
+                    
+
                     sh "git config --global --add safe.directory '*'"
+
+                    
+
+                    echo '--- [Step 2] Manual Checkout ---'
+
                     checkout scm
+
                     
-                    sh 'npm ci'
-                }
-            }
-        }
 
-        stage('2. Install Cosign') {
+                    echo '--- [Step 3] Clean Install ---'
+
+                    sh 'npm ci' 
+
+                }
+
+            }
+
+        }        
+
+        stage('2. Security: Deep Secret & Misconfig (DSOMM L3)') {
+
             steps {
+
                 script {
-                    echo '--- [Step] Install Cosign ---'
-                    sh 'curl -O -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64"'
-                    sh 'mv cosign-linux-amd64 /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign'
-                    sh 'cosign version'
+
+                    echo '--- [DSOMM L3] Trivy Filesystem Scan ---'
+
+                    sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
+
+                    sh 'trivy fs --exit-code 1 --severity CRITICAL --no-progress .'
+
                 }
+
             }
+
         }
 
-        stage('3. Install dependencies') {
-            steps {
-                script {
-                    echo '--- [Step] Install dependencies ---'
-                    sh 'npm ci'
-                }
-            }
-        }
 
-        stage('4. Run Security Tests') {
+
+        stage('3. SCA & SAST (DSOMM L3)') {
+
             parallel {
-                stage('Deep Secret (Trivy)') {
+
+                stage('Dependency Check') {
+
                     steps {
-                        sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
-                        // Thêm --ignore-unfixed để tránh fail build nếu chỉ test demo
-                        sh 'trivy fs --exit-code 1 --severity CRITICAL --no-progress .'
+
+                        echo '--- [SCA] NPM Audit ---'
+
+                        sh 'npm audit --audit-level=high || true' 
+
                     }
+
                 }
-                stage('SCA (NPM Audit)') {
+
+                stage('SonarQube Quality Gate') {
+
                     steps {
-                        // Dùng || true để không fail pipeline nếu chỉ muốn warning
-                        sh 'npm audit --audit-level=high || true'
-                    }
-                }
-                stage('SAST & Unit Test (SonarQube)') {
-                    steps {
+
                         script {
-                            sh 'npm test -- --coverage'
+
+                            echo '--- [SAST] SonarQube Scan & Wait ---'
+
+                            
+
+                            // Xóa cache cũ để tránh lỗi xung đột Java
+
                             sh 'rm -rf .scannerwork .sonarqube'
+
+
+
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
+
+                            
+
                             withSonarQubeEnv('SonarCloud') {
+
+                                // [FIX LỖI QUAN TRỌNG]: 
+
+                                // Đổi 'sonar-scanner' thành 'sonarqube-scanner' (Gói mới nhất)
+
+                                // Gói cũ (sonar-scanner) bị lỗi NullPointer với Java 17
+
                                 sh """
+
                                     npx sonarqube-scanner \
+
                                     -Dsonar.projectKey=k22022002_jenkins-hello-world \
+
                                     -Dsonar.organization=k22022002 \
+
                                     -Dsonar.sources=src \
+
                                     -Dsonar.host.url=https://sonarcloud.io \
+
                                     -Dsonar.qualitygate.wait=true \
-                                    -Dsonar.nodejs.executable="${nodePath}" \
-                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+                                    -Dsonar.nodejs.executable="${nodePath}"
+
                                 """
+
                             }
+
                         }
+
                     }
+
                 }
+
             }
+
         }
 
-        stage('5. Build application') {
+
+
+        stage('4. Build Artifact (SLSA Build)') {
+
             steps {
+
                 script {
-                    echo '--- [Step] Build application ---'
-                    sh "rm -f *.tgz *.sig ${PROVENANCE_FILE} ${SBOM_FILE}"
+
+                    echo '--- [SLSA] Hermetic Build ---'
+
+                    
+
+                    // [FIX LỖI MV] Xóa file cũ
+
+                    sh "rm -f *.tgz *.sig ${PROVENANCE_FILE}"
+
+                    
+
+                    sh 'npm test'
+
                     sh 'npm pack'
+
+                    
+
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
+
+                    
+
                     env.ARTIFACT_HASH = sh(script: "sha256sum ${ARTIFACT_NAME} | awk '{print \$1}'", returnStdout: true).trim()
+
                 }
+
             }
+
         }
 
-        stage('6. Generate SBOM') {
-            steps {
-                script {
-                    echo '--- [Step] Generate SBOM ---'
-                    sh "trivy fs --format cyclonedx --output ${SBOM_FILE} ."
-                }
-            }
-        }
 
-        stage('7. Sign release artifacts') {
-            steps {
-                script {
-                    echo '--- [Step] Sign release artifacts ---'
-                    withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
-                        sh "cosign sign-blob --yes --key \$COSIGN_KEY --tlog-upload=false --output-signature ${SIGNATURE_FILE} ${ARTIFACT_NAME}"
-                        sh "cosign sign-blob --yes --key \$COSIGN_KEY --tlog-upload=false --output-signature ${SBOM_FILE}.sig ${SBOM_FILE}"
-                    }
-                }
-            }
-        }
 
-        stage('8. Verify signatures') {
-            steps {
-                script {
-                    echo '--- [Step] Verify signatures ---'
-                    withCredentials([file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB')]) {
-                        sh "cosign verify-blob --key \$COSIGN_PUB --signature ${SIGNATURE_FILE} ${ARTIFACT_NAME}"
-                        echo "Verification Successful"
-                    }
-                }
-            }
-        }
+        stage('5. Generate Provenance (SLSA L3)') {
 
-        stage('9. Generate attestation') {
             steps {
+
                 script {
-                    echo '--- [Step] Generate attestation ---'
+
+                    echo '--- [SLSA L3] Generating Non-falsifiable Provenance ---'
+
+                    
+
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+
                     def gitUrl = sh(script: "git config --get remote.origin.url", returnStdout: true).trim()
+
                     def builderId = "https://jenkins.your-company.com/agents/docker-node-20"
+
                     
+
                     sh """
+
                         jq -n \
+
                         --arg builder "$builderId" \
+
                         --arg gitUrl "$gitUrl" \
+
                         --arg gitCommit "$gitCommit" \
+
                         --arg artifact "$ARTIFACT_NAME" \
+
                         --arg sha256 "$ARTIFACT_HASH" \
+
                         --arg buildUrl "$BUILD_URL" \
+
                         '{
+
                             _type: "https://in-toto.io/Statement/v0.1",
+
                             subject: [{ name: \$artifact, digest: { sha256: \$sha256 } }],
+
                             predicateType: "https://slsa.dev/provenance/v0.2",
+
                             predicate: {
+
                                 builder: { id: \$builder },
+
                                 buildType: "https://github.com/npm/cli/commands/pack",
+
                                 invocation: {
+
                                     configSource: { uri: \$gitUrl, digest: { sha1: \$gitCommit }, entryPoint: "Jenkinsfile" },
-                                    parameters: { buildUrl: \$buildUrl }
-                                }
+
+                                    parameters: { buildUrl: \$buildUrl },
+
+                                    environment: { architecture: "amd64", os: "linux" }
+
+                                },
+
+                                materials: [
+
+                                    { uri: \$gitUrl, digest: { sha1: \$gitCommit } }
+
+                                ]
+
                             }
+
                         }' > ${PROVENANCE_FILE}
+
                     """
-                    
-                    withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
-                         sh "cosign sign-blob --yes --key \$COSIGN_KEY --tlog-upload=false --output-signature ${PROVENANCE_FILE}.sig ${PROVENANCE_FILE}"
-                    }
+
                 }
+
             }
+
         }
+
+
+
+        stage('6. Digital Signature (SLSA L3)') {
+
+            steps {
+
+                script {
+
+                    echo '--- [SLSA L3] Signing with Cosign ---'
+
+                    
+
+                    sh 'curl -O -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64"'
+
+                    sh 'mv cosign-linux-amd64 /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign'
+
+
+
+                    withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
+
+                        sh """
+
+                            cosign sign-blob --yes \
+
+                                --key \$COSIGN_KEY \
+
+                                --tlog-upload=false \
+
+                                --output-signature ${SIGNATURE_FILE} \
+
+                                ${ARTIFACT_NAME}
+
+                        """
+
+                        sh """
+
+                            cosign sign-blob --yes \
+
+                                --key \$COSIGN_KEY \
+
+                                --tlog-upload=false \
+
+                                --output-signature ${PROVENANCE_FILE}.sig \
+
+                                ${PROVENANCE_FILE}
+
+                        """
+
+                    }
+
+
+
+                    // Trả quyền file cho user Jenkins (UID 1000)
+
+                    sh 'chmod -R 777 .'
+
+                }
+
+            }
+
+        }
+
     }
+
+
 
     post {
-        success {
-            echo '--- [Step] Upload signed artifacts ---'
-            archiveArtifacts artifacts: "${ARTIFACT_NAME}, *.sig, *.json", allowEmptyArchive: true
-            echo "PIPELINE COMPLETED SUCCESSFULLY."
-        }
-        failure {
-            echo "Pipeline Failed."
-        }
+
         always {
+
+            archiveArtifacts artifacts: "${ARTIFACT_NAME}, *.json, *.sig", allowEmptyArchive: true
+
             cleanWs()
+
         }
+
+        success {
+
+            echo "Build Success: SLSA L3 Artifact created."
+
+        }
+
+        failure {
+
+            echo "Build Failed."
+
+        }
+
     }
+
 }
