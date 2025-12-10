@@ -5,9 +5,8 @@ pipeline {
         docker {
 
             image 'node:20' 
-
-            args '-u root:root'    
-
+	    reuseNode true
+            args '-u root:root -v /var/run/docker.sock:/var/run/docker.sock'    
         }
 
     }
