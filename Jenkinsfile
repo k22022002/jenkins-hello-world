@@ -1,10 +1,14 @@
 pipeline {
     agent {
         docker {
-            // [FIX LỖI] Nâng cấp lên Node 20 để hỗ trợ hàm .toReversed() của SonarScanner mới
-            image 'node:20-alpine' 
-            args '-u root:root' 
+            image 'node:20-alpine' // Node 20 (cần cho Sonar mới)
+            args '-u root:root'    // Chạy quyền root để được phép cài Git
         }
+    }
+
+    // [QUAN TRỌNG] Dòng này tắt việc Jenkins tự ý tải code khi chưa có Git
+    options {
+        skipDefaultCheckout()
     }
 
     environment {
@@ -12,22 +16,30 @@ pipeline {
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
         
-        // Credentials
+        // Credentials (giữ nguyên như cũ)
         COSIGN_PWD = credentials('cosign-password-id') 
         SONAR_TOKEN = credentials('sonarcloud-token') 
     }
 
     stages {
-        stage('1. Checkout & Preparation') {
+        stage('1. Setup & Checkout') {
             steps {
                 script {
-                    echo '--- [Prep] Environment Setup ---'
-                    // Cài Java (cho SonarScanner) và các tools cần thiết
+                    echo '--- [Step 1] Installing Git & Tools ---'
+                    // 1. Cài Git thủ công vì image alpine không có sẵn
+                    // Cài luôn Java (cho SonarScanner)
                     sh 'apk add --no-cache git curl jq docker-cli openjdk17-jre'
                     
+                    echo '--- [Step 2] Manual Checkout ---'
+                    // 2. Sau khi có Git, ta mới ra lệnh tải code về
                     checkout scm
                     
-                    // Dùng npm install (vì repo chưa có package-lock.json chuẩn)
+                    echo '--- [Debug] Checking Files ---'
+                    // 3. Kiểm tra xem file đã về chưa (sẽ thấy package.json ở đây)
+                    sh 'ls -la'
+                    
+                    echo '--- [Step 3] Clean Install ---'
+                    // 4. Bây giờ npm ci mới chạy được vì đã có file lock
                     sh 'npm ci' 
                 }
             }
@@ -38,7 +50,6 @@ pipeline {
                 script {
                     echo '--- [DSOMM L3] Trivy Filesystem Scan ---'
                     sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
-                    // Quét bảo mật
                     sh 'trivy fs --exit-code 1 --severity CRITICAL --no-progress .'
                 }
             }
@@ -56,10 +67,7 @@ pipeline {
                     steps {
                         script {
                             echo '--- [SAST] SonarQube Scan & Wait ---'
-                            
-                            // Lấy đường dẫn Node.js
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
-                            echo "Node.js path detected: ${nodePath}"
                             
                             withSonarQubeEnv('SonarCloud') {
                                 sh """
@@ -97,7 +105,7 @@ pipeline {
                     echo '--- [SLSA L3] Generating Non-falsifiable Provenance ---'
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
                     def gitUrl = sh(script: "git config --get remote.origin.url", returnStdout: true).trim()
-                    def builderId = "https://jenkins.your-company.com/agents/docker-node-18"
+                    def builderId = "https://jenkins.your-company.com/agents/docker-node-20"
                     
                     sh """
                         jq -n \
@@ -144,7 +152,6 @@ pipeline {
                                 --output-signature ${SIGNATURE_FILE} \
                                 ${ARTIFACT_NAME}
                         """
-                        
                         sh """
                             cosign sign-blob --yes \
                                 --key \$COSIGN_KEY \
