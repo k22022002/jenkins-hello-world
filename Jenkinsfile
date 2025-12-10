@@ -1,12 +1,11 @@
 pipeline {
     agent {
         docker {
-            image 'node:20-alpine' // Node 20 (cần cho Sonar mới)
-            args '-u root:root'    // Chạy quyền root để được phép cài Git
+            image 'node:20-alpine' 
+            args '-u root:root'    
         }
     }
 
-    // [QUAN TRỌNG] Dòng này tắt việc Jenkins tự ý tải code khi chưa có Git
     options {
         skipDefaultCheckout()
     }
@@ -16,7 +15,6 @@ pipeline {
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
         
-        // Credentials (giữ nguyên như cũ)
         COSIGN_PWD = credentials('cosign-password-id') 
         SONAR_TOKEN = credentials('sonarcloud-token') 
     }
@@ -26,20 +24,12 @@ pipeline {
             steps {
                 script {
                     echo '--- [Step 1] Installing Git & Tools ---'
-                    // 1. Cài Git thủ công vì image alpine không có sẵn
-                    // Cài luôn Java (cho SonarScanner)
                     sh 'apk add --no-cache git curl jq docker-cli openjdk17-jre'
                     
                     echo '--- [Step 2] Manual Checkout ---'
-                    // 2. Sau khi có Git, ta mới ra lệnh tải code về
                     checkout scm
                     
-                    echo '--- [Debug] Checking Files ---'
-                    // 3. Kiểm tra xem file đã về chưa (sẽ thấy package.json ở đây)
-                    sh 'ls -la'
-                    
                     echo '--- [Step 3] Clean Install ---'
-                    // 4. Bây giờ npm ci mới chạy được vì đã có file lock
                     sh 'npm ci' 
                 }
             }
@@ -90,7 +80,12 @@ pipeline {
             steps {
                 script {
                     echo '--- [SLSA] Hermetic Build ---'
-                    sh 'rm -f *.tgz *.sig *.json'
+                    
+                    // [ĐÃ SỬA LỖI TẠI ĐÂY]
+                    // Chỉ xóa file rác cụ thể, KHÔNG dùng *.json để tránh xóa mất package.json
+                    sh "rm -f ${ARTIFACT_NAME} ${SIGNATURE_FILE} ${PROVENANCE_FILE}"
+                    
+                    // Bây giờ lệnh này sẽ chạy thành công vì package.json vẫn còn
                     sh 'npm test'
                     sh 'npm pack'
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
