@@ -1,16 +1,16 @@
-pipeline {
-    agent {
-        docker {
+pipeline{
+    agent{
+        docker{
             image 'node:20' 
             args '-u root:root'    
         }
     }
 
-    options {
+    options{
         skipDefaultCheckout()
     }
 
-    environment {
+    environment{
         ARTIFACT_NAME = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
@@ -19,10 +19,10 @@ pipeline {
         SONAR_TOKEN = credentials('sonarcloud-token') 
     }
 
-    stages {
-	stage('1. Setup & Checkout') {
-            steps {
-                script {
+    stages{
+	stage('1. Setup & Checkout'){
+            steps{
+                script{
                     // Ensure workspace is clean to avoid permission errors from previous runs
                     cleanWs()
 
@@ -40,9 +40,9 @@ pipeline {
                 }
             }
         }        
-        stage('2. Security: Deep Secret & Misconfig (DSOMM L3)') {
-            steps {
-                script {
+        stage('2. Security: Deep Secret & Misconfig (DSOMM L3)'){
+            steps{
+                script{
                     echo '--- [DSOMM L3] Trivy Filesystem Scan ---'
                     sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
                     sh 'trivy fs --exit-code 1 --severity CRITICAL --no-progress .'
@@ -50,25 +50,23 @@ pipeline {
             }
         }
 
-        stage('3. SCA & SAST (DSOMM L3)') {
-            parallel {
-                stage('Dependency Check') {
-                    steps {
+        stage('3. SCA & SAST (DSOMM L3)'){
+            parallel{
+                stage('Dependency Check'){
+                    steps{
                         echo '--- [SCA] NPM Audit ---'
                         sh 'npm audit --audit-level=high || true' 
                     }
                 }
-                stage('SonarQube Quality Gate') {
-                    steps {
-                        script {
+                stage('SonarQube Quality Gate'){
+                    steps{
+                        script{
                             echo '--- [SAST] SonarQube Scan & Wait ---'
                             
                             // Xóa cache cũ để tránh lỗi xung đột Java
                             sh 'rm -rf .scannerwork .sonarqube'
-
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
-                            
-                            withSonarQubeEnv('SonarCloud') {
+                            withSonarQubeEnv('SonarCloud'){
                                 // [FIX LỖI QUAN TRỌNG]: 
                                 // Đổi 'sonar-scanner' thành 'sonarqube-scanner' (Gói mới nhất)
                                 // Gói cũ (sonar-scanner) bị lỗi NullPointer với Java 17
@@ -88,9 +86,9 @@ pipeline {
             }
         }
 
-        stage('4. Build Artifact (SLSA Build)') {
-            steps {
-                script {
+        stage('4. Build Artifact (SLSA Build)'){
+            steps{
+                script{
                     echo '--- [SLSA] Hermetic Build ---'
                     
                     // [FIX LỖI MV] Xóa file cũ
@@ -106,9 +104,9 @@ pipeline {
             }
         }
 
-        stage('5. Generate Provenance (SLSA L3)') {
-            steps {
-                script {
+        stage('5. Generate Provenance (SLSA L3)'){
+            steps{
+                script{
                     echo '--- [SLSA L3] Generating Non-falsifiable Provenance ---'
                     
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
@@ -144,16 +142,14 @@ pipeline {
                 }
             }
         }
-
-        stage('6. Digital Signature (SLSA L3)') {
-            steps {
-                script {
+        stage('6. Digital Signature (SLSA L3)'){
+            steps{
+                script{
                     echo '--- [SLSA L3] Signing with Cosign ---'
                     
                     sh 'curl -O -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64"'
                     sh 'mv cosign-linux-amd64 /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign'
-
-                    withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
+                    withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]){
                         sh """
                             cosign sign-blob --yes \
                                 --key \$COSIGN_KEY \
@@ -177,17 +173,16 @@ pipeline {
         }
     }
 
-    post {
-        always {
+    post{
+        always{
             archiveArtifacts artifacts: "${ARTIFACT_NAME}, *.json, *.sig", allowEmptyArchive: true
             cleanWs()
         }
-        success {
+        success{
             echo "Build Success: SLSA L3 Artifact created."
         }
-        failure {
+        failure{
             echo "Build Failed."
         }
     }
 }
-
