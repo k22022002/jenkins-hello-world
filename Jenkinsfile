@@ -20,11 +20,16 @@ pipeline {
     }
 
     stages {
-        stage('1. Setup & Checkout') {
+	stage('1. Setup & Checkout') {
             steps {
                 script {
-                    echo '--- [Step 1] Installing Git & Tools ---'
-                    sh 'apk add --no-cache git curl jq docker-cli openjdk17-jre'
+                    // Ensure workspace is clean to avoid permission errors from previous runs
+                    cleanWs()
+
+                    echo '--- [Step 1] Installing Tools (Debian/Ubuntu) ---'
+                    // Using apt-get because 'node:20' is Debian-based
+                    sh 'apt-get update && apt-get install -y git curl jq openjdk-17-jre docker.io'
+                    
                     sh "git config --global --add safe.directory '*'"
                     
                     echo '--- [Step 2] Manual Checkout ---'
@@ -34,8 +39,7 @@ pipeline {
                     sh 'npm ci' 
                 }
             }
-        }
-        
+        }        
         stage('2. Security: Deep Secret & Misconfig (DSOMM L3)') {
             steps {
                 script {
