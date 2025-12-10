@@ -1,13 +1,14 @@
 pipeline {
     agent {
         docker {
-            image 'node:20-alpine' 
-            args '-u root:root --entrypoint=""'   
+            image 'node:20' 
+            args '-u root:root -t -d --entrypoint=""'   
         }
     }
 
     options {
         skipDefaultCheckout()
+	timeout(time: 1, unit: 'HOURS')
     }
 
     environment {
@@ -27,15 +28,37 @@ pipeline {
             steps {
                 script {
                     cleanWs()
-                    echo '--- [Step] Set up job & Checkout code (Alpine) ---'
+                    echo '--- [Step] Set up job & Checkout code ---'
                     
-                    // 3. Thay lệnh apt-get bằng APK (của Alpine)
-                    // --no-cache: Không lưu rác, cài xong xóa cache luôn (nhanh)
-                    // libc6-compat: Cần thiết để chạy các tool như SonarScanner/Cosign trên Alpine
-                    sh 'apk add --no-cache git curl jq openjdk17-jre docker-cli libc6-compat'
+                    // KỸ THUẬT "CHIA ĐỂ TRỊ":
+                    // Không chạy gộp 'apt-get update && install' chung một dòng
+                    // Tách ra để Jenkins nhận được tín hiệu process vẫn đang chạy sau mỗi lệnh
                     
+                    sh 'export DEBIAN_FRONTEND=noninteractive'
+                    
+                    // 1. Update trước
+                    echo '--- Updating apt repos ---'
+                    sh 'apt-get update'
+                    
+                    // 2. Cài các tool nhẹ trước
+                    echo '--- Installing basic tools ---'
+                    sh 'apt-get install -y --no-install-recommends git curl jq'
+                    
+                    // 3. Cài Java (Nặng nhất) riêng một mình nó
+                    echo '--- Installing Java (This may take time) ---'
+                    sh 'apt-get install -y --no-install-recommends openjdk-17-jre'
+                    
+                    // 4. Cài Docker client
+                    echo '--- Installing Docker CLI ---'
+                    sh 'apt-get install -y --no-install-recommends docker.io'
+                    
+                    // Checkout code sau khi môi trường đã sạch sẽ
+                    echo '--- Checking out source code ---'
                     sh "git config --global --add safe.directory '*'"
                     checkout scm
+                    
+                    // Cài Node modules
+                    sh 'npm ci'
                 }
             }
         }
