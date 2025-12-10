@@ -160,6 +160,7 @@ pipeline {
                                 ${PROVENANCE_FILE}
                         """
                     }
+		sh 'chown -R 1000:1000 .'
                 }
             }
         }
