@@ -1,8 +1,8 @@
 pipeline {
     agent {
         docker {
-            image 'node:18-alpine' 
-            // Mount docker socket và chạy dưới quyền root
+            // [FIX LỖI] Nâng cấp lên Node 20 để hỗ trợ hàm .toReversed() của SonarScanner mới
+            image 'node:20-alpine' 
             args '-u root:root' 
         }
     }
@@ -27,8 +27,8 @@ pipeline {
                     
                     checkout scm
                     
-                    // Dùng npm install thay vì npm ci (vì chưa có package-lock.json)
-                    sh 'npm ci' 
+                    // Dùng npm install (vì repo chưa có package-lock.json chuẩn)
+                    sh 'npm install' 
                 }
             }
         }
@@ -57,12 +57,11 @@ pipeline {
                         script {
                             echo '--- [SAST] SonarQube Scan & Wait ---'
                             
-                            // [FIX LỖI QUAN TRỌNG]: Lấy đường dẫn Node.js
+                            // Lấy đường dẫn Node.js
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
                             echo "Node.js path detected: ${nodePath}"
                             
                             withSonarQubeEnv('SonarCloud') {
-                                // Truyền nodePath vào tham số -Dsonar.nodejs.executable
                                 sh """
                                     npx sonar-scanner \
                                     -Dsonar.projectKey=k22022002_jenkins-hello-world \
