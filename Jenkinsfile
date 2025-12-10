@@ -23,18 +23,26 @@ pipeline {
 
     stages {
         // --- 1. Set up job & Checkout & Setup Node.js ---
-        stage('1. Setup & Checkout') {
+	stage('1. Setup & Checkout') {
             steps {
                 script {
                     cleanWs()
                     echo '--- [Step] Set up job & Checkout code ---'
-                    sh 'apt-get update && apt-get install -y git curl jq openjdk-17-jre docker.io'
+                    
+                    // SỬA DÒNG NÀY:
+                    // 1. Thêm export DEBIAN_FRONTEND=noninteractive để tránh bị treo khi cài đặt
+                    // 2. Thêm --no-install-recommends để cài nhẹ hơn
+                    sh '''
+                        export DEBIAN_FRONTEND=noninteractive
+                        apt-get update
+                        apt-get install -y --no-install-recommends git curl jq openjdk-17-jre docker.io
+                    '''
+                    
                     sh "git config --global --add safe.directory '*'"
                     checkout scm
                 }
             }
         }
-
         // --- 2. Install Cosign (Theo đúng thứ tự trong ảnh) ---
         stage('2. Install Cosign') {
             steps {
