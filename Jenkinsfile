@@ -15,7 +15,7 @@ pipeline {
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
         
-        COSIGN_PWD = credentials('cosign-password-id') 
+	COSIGN_PASSWORD = credentials('cosign-password-id')
         SONAR_TOKEN = credentials('sonarcloud-token') 
     }
 
