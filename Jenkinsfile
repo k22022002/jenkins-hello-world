@@ -25,19 +25,18 @@ pipeline {
     stages {
         // --- 1. Set up job & Checkout & Setup Node.js ---
         stage('1. Setup & Checkout') {
-		script {
-   			 cleanWs()
-   			 echo '--- [Step] Set up job & Checkout code ---'
-    
-   			 // Test mạng trước cho chắc (Optional)
-   			 sh 'curl -I https://www.google.com || echo "Mat mang roi!"'
+            steps {
+                script {
+                    cleanWs()
+                    echo '--- [Step] Set up job & Checkout code ---'
+        
 
-   			 // Thêm -qq để nó ít in ra log rác, chạy nhanh hơn
-   			 sh 'apt-get update -qq && apt-get install -y -qq git curl jq openjdk-17-jre docker.io'
-    
-   			 sh "git config --global --add safe.directory '*'"
-   			 checkout scm
-		}
+                    // Thêm -qq để nó ít in ra log rác, chạy nhanh hơn
+                    sh 'apt-get update -qq && apt-get install -y -qq git curl jq openjdk-17-jre docker.io'
+        
+                    sh "git config --global --add safe.directory '*'"
+                    checkout scm
+                }
             }
         }
 
