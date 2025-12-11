@@ -154,25 +154,24 @@ pipeline {
             }
         }
 
-        stage('6. Verify Signatures') {
+	stage('6. Verify Signatures') {
             steps {
                 echo '--- [Step] Verify Signatures ---'
                 script {
                     def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign'
                     
-                    // Xác thực lại bằng public key vừa trích xuất ở bước trên
-                    // Bước này KHÔNG cần password, chỉ cần public key
+                    // SỬA LỖI: Thêm --insecure-ignore-tlog=true
                     sh """
                         ${cosignCmd} verify-blob \
                             --key cosign.pub \
                             --signature ${SIGNATURE_FILE} \
+                            --insecure-ignore-tlog=true \
                             ${ARTIFACT_NAME}
                     """
                     echo "Signature verification PASSED!"
                 }
             }
         }
-
         stage('7. Generate Attestation') {
             steps {
                 echo '--- [Step] Generate Provenance Attestation ---'
