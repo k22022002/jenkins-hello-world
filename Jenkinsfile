@@ -1,8 +1,9 @@
 pipeline {
     agent {
-        docker {
-            image 'node:20'
-	    args '--entrypoint="" -u 0:0 -v /var/run/docker.sock:/var/run/docker.sock --security-opt seccomp=unconfined'
+	dockerfile {
+            filename 'Dockerfile'
+            // Vẫn cần mount socket để chạy docker bên trong
+            args '--network host -u 0:0 -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
@@ -20,23 +21,13 @@ pipeline {
     }
 
     stages {
-        stage('1. Setup & Checkout') {
+	stage('1. Setup & Checkout') {
             steps {
                 script {
-                    // Ensure workspace is clean to avoid permission errors from previous runs
-                    cleanWs()
-
-                    echo '--- [Step 1] Installing Tools (Debian/Ubuntu) ---'
-                    // Using apt-get because 'node:20' is Debian-based
-                    sh 'apt-get update && apt-get install -y git curl jq openjdk-17-jre docker.io'
-                    
+                    echo '--- [Step] Image đã có sẵn tools, không cần cài lại ---'
+                    // XÓA BỎ lệnh sh 'apt-get install...' đi
                     sh "git config --global --add safe.directory '*'"
-                    
-                    echo '--- [Step 2] Manual Checkout ---'
                     checkout scm
-                    
-                    echo '--- [Step 3] Clean Install ---'
-                    sh 'npm ci'
                 }
             }
         }
