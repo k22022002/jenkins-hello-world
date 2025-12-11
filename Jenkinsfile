@@ -27,12 +27,7 @@ pipeline {
         stage('1. Setup & Checkout') {
             steps {
                 script {
-                    cleanWs()
-                    echo '--- [Step] Set up job & Checkout code ---'
-                    // Installing docker.io inside the container so we can use docker CLI
-                    sh 'apt-get update && apt-get install -y git curl jq openjdk-17-jre docker.io'
-                    sh "git config --global --add safe.directory '*'"
-                    checkout scm
+			sh 'echo "Container da khoi dong thanh cong!"'
                 }
             }
         }
