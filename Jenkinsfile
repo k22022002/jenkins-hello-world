@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'node:20-bookworm' 
+            image 'my-jenkins-agent:v1' 
             // Added socket mapping so the docker command inside the container can talk to the host
             args '--entrypoint="" -u root:root -v /var/run/docker.sock:/var/run/docker.sock'   
 	    alwaysPull false
