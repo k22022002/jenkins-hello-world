@@ -21,28 +21,27 @@ pipeline {
                 checkout scm
                 
                 script {
-                    // 1. Install Cosign (FIXED)
-                    // Xóa file cũ nếu bị lỗi
+                    // 1. Install Cosign (Sử dụng GCS Mirror ổn định hơn)
                     sh 'rm -f cosign'
                     
                     sh '''
-                        echo "Downloading Cosign..."
-                        # Sử dụng version cụ thể (v2.2.4) để tránh lỗi redirect link
-                        curl -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign
+                        echo "Downloading Cosign from GCS..."
                         
-                        # Cấp quyền thực thi
+                        # Thay đổi link sang Google Storage (tránh lỗi HTML từ GitHub)
+                        curl -L "https://storage.googleapis.com/cosign-releases/v2.2.4/cosign-linux-amd64" -o cosign
+                        
                         chmod +x cosign
                         
-                        # Kiểm tra xem file tải về có đúng là binary không
+                        # Kiểm tra lại file
                         if file cosign | grep -q "HTML"; then
-                            echo "ERROR: Downloaded file is HTML, not binary. Check internet or URL."
+                            echo "ERROR: Downloaded file is still HTML. Network might be blocking downloads."
                             exit 1
                         fi
                         
-                        # Thêm vào PATH tạm thời
+                        # Thêm vào PATH
                         export PATH=$PWD:$PATH
                         
-                        # Kiểm tra version để chắc chắn chạy được
+                        # Verify version để đảm bảo thành công
                         ./cosign version
                     '''
                     
@@ -50,7 +49,7 @@ pipeline {
                     sh 'npm install'
                 }
             }
-        }        
+        }
         stage('2. Run Security Tests') {
             parallel {
                 stage('Secret Scan (Gitleaks)') {
