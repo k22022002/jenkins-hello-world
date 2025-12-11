@@ -21,31 +21,29 @@ pipeline {
                 checkout scm
                 
                 script {
-                    // 1. Install Cosign (Sử dụng GCS Mirror ổn định hơn)
+                    echo "Installing Cosign via Docker (Reliable Method)..."
+                    // 1. Xóa cosign cũ (nếu có)
                     sh 'rm -f cosign'
                     
-                    sh '''
-                        echo "Downloading Cosign from GCS..."
-                        
-                        # Thay đổi link sang Google Storage (tránh lỗi HTML từ GitHub)
-                        curl -L "https://storage.googleapis.com/cosign-releases/v2.2.4/cosign-linux-amd64" -o cosign
-                        
-                        chmod +x cosign
-                        
-                        # Kiểm tra lại file
-                        if file cosign | grep -q "HTML"; then
-                            echo "ERROR: Downloaded file is still HTML. Network might be blocking downloads."
-                            exit 1
-                        fi
-                        
-                        # Thêm vào PATH
-                        export PATH=$PWD:$PATH
-                        
-                        # Verify version để đảm bảo thành công
-                        ./cosign version
-                    '''
+                    // 2. Dùng Docker để lấy file binary ra (Bypass mọi lỗi mạng/curl)
+                    // Bước A: Pull image chính chủ bitnami (nhẹ và an toàn)
+                    sh 'docker pull bitnami/cosign:2.2.4'
                     
-                    // 2. Install Dependencies
+                    // Bước B: Tạo container tạm (không cần chạy, chỉ cần create)
+                    sh 'docker create --name temp-cosign-extractor bitnami/cosign:2.2.4'
+                    
+                    // Bước C: Copy file cosign từ trong container ra thư mục hiện tại
+                    // Đường dẫn chuẩn trong ảnh bitnami là /opt/bitnami/cosign/bin/cosign
+                    sh 'docker cp temp-cosign-extractor:/opt/bitnami/cosign/bin/cosign .'
+                    
+                    // Bước D: Dọn dẹp container tạm
+                    sh 'docker rm temp-cosign-extractor'
+                    
+                    // 3. Cấp quyền và kiểm tra
+                    sh 'chmod +x cosign'
+                    sh './cosign version' // Nếu hiện version là thành công 100%
+                    
+                    // 4. Install Dependencies
                     sh 'npm install'
                 }
             }
