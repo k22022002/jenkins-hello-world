@@ -2,11 +2,11 @@ pipeline {
     agent any
 
     environment {
-        ARTIFACT_NAME = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
+        ARTIFACT_NAME   = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
         PROVENANCE_FILE = "provenance.json"
-        SIGNATURE_FILE = "${ARTIFACT_NAME}.sig"
-        // Password giả lập cho Cosign
-        COSIGN_PASSWORD = "my-secure-password" 
+        SIGNATURE_FILE  = "${ARTIFACT_NAME}.sig"
+        SBOM_FILE       = "sbom.json"
+        // Đã xóa COSIGN_PASSWORD cứng ở đây để bảo mật
     }
 
     tools {
@@ -14,87 +14,156 @@ pipeline {
     }
 
     stages {
-        stage('1. Checkout & Clean') {
+        stage('1. Initialize & Dependencies') {
             steps {
-                echo '--- [Prep] Cleaning Workspace & Checkout ---'
-                // QUAN TRỌNG: Xóa sạch rác của lần build trước (bao gồm cosign.key cũ)
-                // Nếu không có lệnh này, Gitleaks sẽ quét thấy key cũ và báo lỗi
-                cleanWs() 
-                
+                echo '--- [Step] Checkout, Node, Cosign, Dependencies ---'
+                cleanWs()
                 checkout scm
-                sh 'npm install'
+                
+                script {
+                    // Install Cosign nếu chưa có
+                    sh '''
+                        if ! command -v cosign &> /dev/null; then
+                            echo "Cosign not found, installing..."
+                            curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+                            mv cosign-linux-amd64 cosign
+                            chmod +x cosign
+                            export PATH=$PWD:$PATH
+                        else
+                            echo "Cosign already installed."
+                        fi
+                    '''
+                    sh 'npm install'
+                }
             }
         }
         
-        stage('2. Advanced Secret Scanning (DSOMM L2)') {
-            steps {
-                echo '--- [DSOMM L2] Deep Secret Detection ---'
-                script {
-                    // Quét code hiện tại. Vì đã cleanWs() nên sẽ không còn cosign.key cũ
-                    try {
-                        sh 'docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect --source="/path" -v --no-git'
-                    } catch (Exception e) {
-                        echo "ALARM: Gitleaks found secrets!"
-                        // Đánh dấu thất bại nếu tìm thấy secret thật sự trong code source
-                        currentBuild.result = 'FAILURE'
-                        error("Pipeline stopped due to secret detection.")
+        stage('2. Run Security Tests') {
+            parallel {
+                stage('Secret Scan (Gitleaks)') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect --source="/path" -v --no-git'
+                            } catch (Exception e) {
+                                currentBuild.result = 'FAILURE'
+                                error("Gitleaks found secrets!")
+                            }
+                        }
+                    }
+                }
+                
+                stage('SCA (Dependency Check)') {
+                    steps {
+                        dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
+                                        odcInstallation: 'OWASP-Dependency-Check'
+                    }
+                }
+
+                stage('SAST (SonarQube)') {
+                    steps {
+                        script {
+                            def nodePath = sh(script: "which node", returnStdout: true).trim()
+                            // Lưu ý: Cần đảm bảo cấu hình 'SonarCloud' trong Jenkins System trỏ tới credential 'sonarcloud-token'
+                            withSonarQubeEnv('SonarCloud') { 
+                                sh """
+                                npx sonar-scanner \
+                                    -Dsonar.projectKey=k22022002_jenkins-hello-world \
+                                    -Dsonar.organization=k22022002 \
+                                    -Dsonar.sources=src \
+                                    -Dsonar.tests=test \
+                                    -Dsonar.host.url=https://sonarcloud.io \
+                                    -Dsonar.nodejs.executable="${nodePath}"
+                                """
+                            }
+                        }
                     }
                 }
             }
         }
 
-        stage('3. SCA - OWASP Dependency Check (DSOMM L1)') {
+        stage('3. Build Application') {
             steps {
-                echo '--- [DSOMM] Software Composition Analysis ---'
-                dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
-                                odcInstallation: 'OWASP-Dependency-Check'
-            }
-            post {
-                always {
-                    dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+                echo '--- [Step] Build Application ---'
+                script {
+                    sh 'rm -f *.tgz *.sig' 
+                    sh 'npm test'
+                    sh "npm pack"
+                    sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
                 }
             }
         }
 
-        stage('4. SAST - Code Quality (DSOMM L1)') {
+        stage('4. Generate SBOM') {
             steps {
-                script {
-                    echo '--- [DSOMM] Static Analysis ---'
-                    def nodePath = sh(script: "which node", returnStdout: true).trim()
-                    withSonarQubeEnv('SonarCloud') { 
+                echo '--- [Step] Generate SBOM (CycloneDX) ---'
+                sh "npx @cyclonedx/cyclonedx-npm --output-file ${SBOM_FILE}"
+            }
+        }
+
+        stage('5. Sign Release Artifacts') {
+            steps {
+                echo '--- [Step] Sign Artifacts using Credentials ---'
+                // Sử dụng withCredentials để lấy key và password an toàn
+                withCredentials([
+                    string(credentialsId: 'cosign-password-id', variable: 'COSIGN_PASSWORD'),
+                    file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_PATH')
+                ]) {
+                    script {
+                        def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign'
+
+                        // 1. Copy file private key từ biến tạm của Jenkins ra workspace
+                        sh "cp \$COSIGN_KEY_PATH cosign.key"
+
+                        // 2. Trích xuất Public Key từ Private Key (để dùng cho bước Verify sau này)
+                        // Lệnh này cần password, cosign sẽ tự đọc từ biến môi trường COSIGN_PASSWORD
+                        sh "${cosignCmd} public-key --key cosign.key --outfile cosign.pub"
+
+                        // 3. Ký Artifact (.tgz)
                         sh """
-                        npx sonar-scanner \
-                            -Dsonar.projectKey=k22022002_jenkins-hello-world \
-                            -Dsonar.organization=k22022002 \
-                            -Dsonar.sources=src \
-                            -Dsonar.tests=test \
-                            -Dsonar.css.node=true \
-                            -Dsonar.host.url=https://sonarcloud.io \
-                            -Dsonar.nodejs.executable="${nodePath}"
+                        ${cosignCmd} sign-blob --yes \
+                            --key cosign.key \
+                            --bundle cosign.bundle \
+                            --tlog-upload=false \
+                            --output-signature ${SIGNATURE_FILE} \
+                            ${ARTIFACT_NAME}
+                        """
+                        
+                        // 4. Ký SBOM (.json)
+                        sh """
+                        ${cosignCmd} sign-blob --yes \
+                            --key cosign.key \
+                            --output-signature ${SBOM_FILE}.sig \
+                            ${SBOM_FILE}
                         """
                     }
                 }
             }
         }
 
-        stage('5. Build Artifact (SLSA Build)') {
+        stage('6. Verify Signatures') {
             steps {
-                echo '--- [SLSA] Build Immutable Artifact ---'
+                echo '--- [Step] Verify Signatures ---'
                 script {
-                    // Dọn dẹp cục bộ để đảm bảo npm pack lấy đúng file
-                    sh 'rm -f *.tgz *.sig' 
-                    sh 'npm test'
-                    sh "npm pack"
-                    // Di chuyển file tgz vừa tạo thành tên chuẩn
-                    sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
+                    def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign'
+                    
+                    // Xác thực lại bằng public key vừa trích xuất ở bước trên
+                    // Bước này KHÔNG cần password, chỉ cần public key
+                    sh """
+                        ${cosignCmd} verify-blob \
+                            --key cosign.pub \
+                            --signature ${SIGNATURE_FILE} \
+                            ${ARTIFACT_NAME}
+                    """
+                    echo "Signature verification PASSED!"
                 }
             }
         }
 
-        stage('6. Generate Provenance (SLSA)') {
+        stage('7. Generate Attestation') {
             steps {
+                echo '--- [Step] Generate Provenance Attestation ---'
                 script {
-                    echo '--- [SLSA] Generating Provenance ---'
                     def artifactSha256 = sh(script: "sha256sum ${ARTIFACT_NAME} | awk '{print \$1}'", returnStdout: true).trim()
                     def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
                     def gitUrl = sh(script: "git config --get remote.origin.url", returnStdout: true).trim()
@@ -121,35 +190,21 @@ pipeline {
                 }
             }
         }
-
-        stage('7. Digital Signature (SLSA L2)') {
+        
+        stage('8. Upload Signed Artifacts') {
             steps {
-                script {
-                    echo '--- [SLSA L2] Signing Artifact ---'
-                    withEnv(['COSIGN_PASSWORD=my-secure-password']) {
-                        // 1. Tạo key nếu chưa có
-                        sh 'if [ ! -f cosign.key ]; then cosign generate-key-pair; fi'
-
-                        // 2. Ký file (FIX LỖI: Dùng --output-signature thay vì >)
-                        sh """
-                        cosign sign-blob --yes \
-                            --key cosign.key \
-                            --bundle cosign.bundle \
-                            --tlog-upload=false \
-                            --output-signature ${SIGNATURE_FILE} \
-                            ${ARTIFACT_NAME}
-                        """
-                    }
-                    echo "Artifact signed successfully."
-                }
+                echo '--- [Step] Archiving Artifacts ---'
+                archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, ${SBOM_FILE}, cosign.pub, cosign.bundle, dependency-check-report.html", allowEmptyArchive: true
             }
         }
     }
+
     post {
+        always {
+             dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+        }
         success {
-            // Thêm cosign.bundle vào danh sách artifacts
-            archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, cosign.pub, cosign.bundle, dependency-check-report.html", allowEmptyArchive: true
-            echo "SUCCESS: Pipeline finished."
+            echo "SUCCESS: Pipeline finished securely."
         }
         failure {
             echo "Pipeline failed."
