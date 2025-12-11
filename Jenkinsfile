@@ -14,30 +14,43 @@ pipeline {
     }
 
     stages {
-        stage('1. Initialize & Dependencies') {
+	stage('1. Initialize & Dependencies') {
             steps {
                 echo '--- [Step] Checkout, Node, Cosign, Dependencies ---'
                 cleanWs()
                 checkout scm
                 
                 script {
-                    // Install Cosign nếu chưa có
+                    // 1. Install Cosign (FIXED)
+                    // Xóa file cũ nếu bị lỗi
+                    sh 'rm -f cosign'
+                    
                     sh '''
-                        if ! command -v cosign &> /dev/null; then
-                            echo "Cosign not found, installing..."
-                            curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
-                            mv cosign-linux-amd64 cosign
-                            chmod +x cosign
-                            export PATH=$PWD:$PATH
-                        else
-                            echo "Cosign already installed."
+                        echo "Downloading Cosign..."
+                        # Sử dụng version cụ thể (v2.2.4) để tránh lỗi redirect link
+                        curl -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign
+                        
+                        # Cấp quyền thực thi
+                        chmod +x cosign
+                        
+                        # Kiểm tra xem file tải về có đúng là binary không
+                        if file cosign | grep -q "HTML"; then
+                            echo "ERROR: Downloaded file is HTML, not binary. Check internet or URL."
+                            exit 1
                         fi
+                        
+                        # Thêm vào PATH tạm thời
+                        export PATH=$PWD:$PATH
+                        
+                        # Kiểm tra version để chắc chắn chạy được
+                        ./cosign version
                     '''
+                    
+                    // 2. Install Dependencies
                     sh 'npm install'
                 }
             }
-        }
-        
+        }        
         stage('2. Run Security Tests') {
             parallel {
                 stage('Secret Scan (Gitleaks)') {
