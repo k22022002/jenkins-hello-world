@@ -3,7 +3,8 @@ pipeline {
         docker {
             image 'node:20-bookworm' 
             // Added socket mapping so the docker command inside the container can talk to the host
-            args '--entrypoint="" -u root:root -v /var/run/docker.sock:/var/run/docker.sock --network host'   
+            args '--entrypoint="" -u root:root -v /var/run/docker.sock:/var/run/docker.sock'   
+	    alwaysPull false
         }
     }
 
@@ -24,18 +25,20 @@ pipeline {
 
     stages {
         // --- 1. Set up job & Checkout & Setup Node.js ---
-        stage('1. Setup & Checkout') {
+	stage('1. Setup & Checkout') {
             steps {
                 script {
                     cleanWs()
                     echo '--- [Step] Set up job & Checkout code ---'
-        
-
-                    // Thêm -qq để nó ít in ra log rác, chạy nhanh hơn
-                    sh 'apt-get update -qq && apt-get install -y -qq git curl jq openjdk-17-jre docker.io'
-        
+                    
+                    // --- ĐÃ XÓA ĐOẠN apt-get update/install ---
+                    // Vì my-jenkins-agent:v1 đã có sẵn git, curl, jq, java, docker rồi!
+                    
                     sh "git config --global --add safe.directory '*'"
                     checkout scm
+                    
+                    // Kiểm tra thử xem tool có chưa (Optional)
+                    sh 'java -version && docker --version'
                 }
             }
         }

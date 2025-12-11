@@ -1,24 +1,21 @@
-FROM node:20
+# Sử dụng base image ổn định, đầy đủ công cụ
+FROM node:20-bookworm
+
+# Chuyển quyền sang root để cài đặt
 USER root
 
-# Cài sẵn mọi thứ cần thiết
+# Cài đặt tất cả các công cụ cần thiết 1 lần duy nhất
+# Kết hợp lệnh để giảm layer và dọn dẹp rác (rm -rf) để giảm dung lượng
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     jq \
     openjdk-17-jre \
-    ca-certificates \
-    gnupg
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
 
-# Cài Docker CLI thủ công (nhẹ hơn cài docker.io)
-RUN install -m 0755 -d /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
-    chmod a+r /etc/apt/keyrings/docker.gpg && \
-    echo \
-    "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-    "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null && \
-    apt-get update && apt-get install -y docker-ce-cli
+# (Tùy chọn) Bạn có thể cài luôn Cosign và Trivy ở đây nếu muốn pipeline sạch hơn nữa
+# Nhưng tạm thời cứ để pipeline cài 2 món đó cũng được.
 
-# Dọn dẹp cho nhẹ
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+# Thiết lập thư mục làm việc mặc định
+WORKDIR /app
