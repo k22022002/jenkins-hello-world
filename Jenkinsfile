@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:20'
-            args '-u root:root'
+	    args '--entrypoint="" -u 0:0 -v /var/run/docker.sock:/var/run/docker.sock --security-opt seccomp=unconfined'
         }
     }
 
