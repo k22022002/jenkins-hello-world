@@ -14,44 +14,40 @@ pipeline {
     }
 
     stages {
-	stage('1. Initialize & Dependencies') {
+        stage('1. Initialize, Test & Coverage') {
             steps {
-                echo '--- [Step] Checkout, Node, Cosign, Dependencies ---'
+                echo '--- [Step] Checkout, Install & Unit Test ---'
                 cleanWs()
                 checkout scm
                 
                 script {
-                    // 1. Install Cosign (FIXED)
-                    // Xóa file cũ nếu bị lỗi
+                    // 1. Install Cosign (Logic giữ nguyên)
                     sh 'rm -f cosign'
-                    
                     sh '''
                         echo "Downloading Cosign..."
-                        # Sử dụng version cụ thể (v2.2.4) để tránh lỗi redirect link
                         curl -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign
-                        
-                        # Cấp quyền thực thi
                         chmod +x cosign
-                        
-                        # Kiểm tra xem file tải về có đúng là binary không
                         if file cosign | grep -q "HTML"; then
-                            echo "ERROR: Downloaded file is HTML, not binary. Check internet or URL."
+                            echo "ERROR: Downloaded file is HTML, not binary."
                             exit 1
                         fi
-                        
-                        # Thêm vào PATH tạm thời
                         export PATH=$PWD:$PATH
-                        
-                        # Kiểm tra version để chắc chắn chạy được
                         ./cosign version
                     '''
                     
                     // 2. Install Dependencies
                     sh 'npm install'
+
+                    // 3. Run Test & Generate Coverage (Shift-left)
+                    // Lệnh này chạy script "test" trong package.json (đã cấu hình Jest coverage)
+                    // Kết quả tạo ra thư mục coverage/lcov.info
+                    echo '--- [Step] Running Unit Tests with Coverage ---'
+                    sh 'npm test' 
                 }
             }
         }
-        stage('2. Run Security Tests') {
+
+        stage('2. Security & Quality Gates') {
             parallel {
                 stage('Secret Scan (Gitleaks)') {
                     steps {
@@ -68,6 +64,8 @@ pipeline {
                 
                 stage('SCA (Dependency Check)') {
                     steps {
+                        echo '--- [Step] Scanning Dependencies ---'
+                        // failOnCVSS 7.0: Pipeline sẽ fail nếu tìm thấy lỗi bảo mật mức High/Critical
                         dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
                                         odcInstallation: 'OWASP-Dependency-Check'
                     }
@@ -79,6 +77,8 @@ pipeline {
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
                             // Lưu ý: Cần đảm bảo cấu hình 'SonarCloud' trong Jenkins System trỏ tới credential 'sonarcloud-token'
                             withSonarQubeEnv('SonarCloud') { 
+                                echo '--- [Step] SonarScanner Analysis ---'
+                                // Thêm tham số sonar.javascript.lcov.reportPaths để đọc coverage từ Stage 1
                                 sh """
                                 npx sonar-scanner \
                                     -Dsonar.projectKey=k22022002_jenkins-hello-world \
@@ -86,8 +86,15 @@ pipeline {
                                     -Dsonar.sources=src \
                                     -Dsonar.tests=test \
                                     -Dsonar.host.url=https://sonarcloud.io \
-                                    -Dsonar.nodejs.executable="${nodePath}"
+                                    -Dsonar.nodejs.executable="${nodePath}" \
+                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
                                 """
+                            }
+                            
+                            // Quality Gate: Chặn pipeline nếu code không đạt chuẩn (ví dụ: Coverage < 80%)
+                            echo '--- [Step] Checking Quality Gate ---'
+                            timeout(time: 5, unit: 'MINUTES') {
+                                waitForQualityGate abortPipeline: true
                             }
                         }
                     }
@@ -100,7 +107,7 @@ pipeline {
                 echo '--- [Step] Build Application ---'
                 script {
                     sh 'rm -f *.tgz *.sig' 
-                    sh 'npm test'
+                    // Đã bỏ 'npm test' ở đây vì đã chạy ở Stage 1
                     sh "npm pack"
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
                 }
@@ -117,7 +124,6 @@ pipeline {
         stage('5. Sign Release Artifacts') {
             steps {
                 echo '--- [Step] Sign Artifacts using Credentials ---'
-                // Sử dụng withCredentials để lấy key và password an toàn
                 withCredentials([
                     string(credentialsId: 'cosign-password-id', variable: 'COSIGN_PASSWORD'),
                     file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_PATH')
@@ -125,14 +131,11 @@ pipeline {
                     script {
                         def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign'
 
-                        // 1. Copy file private key từ biến tạm của Jenkins ra workspace
+                        // 1. Setup Key
                         sh "cp \$COSIGN_KEY_PATH cosign.key"
-
-                        // 2. Trích xuất Public Key từ Private Key (để dùng cho bước Verify sau này)
-                        // Lệnh này cần password, cosign sẽ tự đọc từ biến môi trường COSIGN_PASSWORD
                         sh "${cosignCmd} public-key --key cosign.key --outfile cosign.pub"
 
-                        // 3. Ký Artifact (.tgz)
+                        // 2. Ký Artifact (.tgz)
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
@@ -142,7 +145,7 @@ pipeline {
                             ${ARTIFACT_NAME}
                         """
                         
-                        // 4. Ký SBOM (.json)
+                        // 3. Ký SBOM (.json)
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
@@ -154,13 +157,12 @@ pipeline {
             }
         }
 
-	stage('6. Verify Signatures') {
+        stage('6. Verify Signatures') {
             steps {
                 echo '--- [Step] Verify Signatures ---'
                 script {
                     def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign'
                     
-                    // SỬA LỖI: Thêm --insecure-ignore-tlog=true
                     sh """
                         ${cosignCmd} verify-blob \
                             --key cosign.pub \
@@ -172,6 +174,7 @@ pipeline {
                 }
             }
         }
+
         stage('7. Generate Attestation') {
             steps {
                 echo '--- [Step] Generate Provenance Attestation ---'
@@ -219,7 +222,7 @@ pipeline {
             echo "SUCCESS: Pipeline finished securely."
         }
         failure {
-            echo "Pipeline failed."
+            echo "Pipeline failed. Please check Security Scans or Quality Gates."
         }
     }
 }
