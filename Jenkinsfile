@@ -120,8 +120,8 @@ pipeline {
                 sh "npx @cyclonedx/cyclonedx-npm --output-file ${SBOM_FILE}"
             }
         }
-
-        stage('5. Sign Release Artifacts') {
+	
+	stage('5. Sign Release Artifacts') {
             steps {
                 echo '--- [Step] Sign Artifacts using Credentials ---'
                 withCredentials([
@@ -135,7 +135,7 @@ pipeline {
                         sh "cp \$COSIGN_KEY_PATH cosign.key"
                         sh "${cosignCmd} public-key --key cosign.key --outfile cosign.pub"
 
-                        // 2. Ký Artifact (.tgz)
+                        // 2. Ký Artifact (.tgz) - Đã có --tlog-upload=false (OK)
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
@@ -145,10 +145,11 @@ pipeline {
                             ${ARTIFACT_NAME}
                         """
                         
-                        // 3. Ký SBOM (.json)
+                        // 3. Ký SBOM (.json) - [ĐÃ SỬA] Thêm --tlog-upload=false
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
+                            --tlog-upload=false \
                             --output-signature ${SBOM_FILE}.sig \
                             ${SBOM_FILE}
                         """
@@ -156,7 +157,6 @@ pipeline {
                 }
             }
         }
-
         stage('6. Verify Signatures') {
             steps {
                 echo '--- [Step] Verify Signatures ---'
