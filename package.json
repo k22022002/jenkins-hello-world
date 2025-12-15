@@ -4,13 +4,15 @@
   "description": "Simple project for Jenkins testing",
   "main": "src/index.js",
   "scripts": {
-    "test": "jest --coverage --reporters=default --reporters=jest-junit"
+    "test": "jest --coverage --reporters=default --reporters=jest-junit",
+    "lint": "eslint src/**/*.js"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "jest": "^29.7.0",
-    "jest-junit": "^16.0.0"
+    "jest-junit": "^16.0.0",
+    "eslint": "^8.56.0"
   },
   "jest": {
     "collectCoverage": true,

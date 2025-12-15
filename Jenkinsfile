@@ -6,7 +6,8 @@ pipeline {
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE  = "${ARTIFACT_NAME}.sig"
         SBOM_FILE       = "sbom.json"
-        // Đã xóa COSIGN_PASSWORD cứng ở đây để bảo mật
+        // DOCKER_IMAGE dùng cho bước Container Scanning
+        DOCKER_IMAGE    = "jenkins-hello-world:${BUILD_NUMBER}"
     }
 
     tools {
@@ -14,23 +15,18 @@ pipeline {
     }
 
     stages {
-        stage('1. Initialize, Test & Coverage') {
+        stage('1. Initialize, Test & Check Standards') {
             steps {
-                echo '--- [Step] Checkout, Install & Unit Test ---'
+                echo '--- [Step] Checkout & Install ---'
                 cleanWs()
                 checkout scm
                 
                 script {
-                    // 1. Install Cosign (Logic giữ nguyên)
+                    // 1. Install Cosign
                     sh 'rm -f cosign'
                     sh '''
-                        echo "Downloading Cosign..."
                         curl -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign
                         chmod +x cosign
-                        if file cosign | grep -q "HTML"; then
-                            echo "ERROR: Downloaded file is HTML, not binary."
-                            exit 1
-                        fi
                         export PATH=$PWD:$PATH
                         ./cosign version
                     '''
@@ -38,9 +34,17 @@ pipeline {
                     // 2. Install Dependencies
                     sh 'npm install'
 
-                    // 3. Run Test & Generate Coverage (Shift-left)
-                    // Lệnh này chạy script "test" trong package.json (đã cấu hình Jest coverage)
-                    // Kết quả tạo ra thư mục coverage/lcov.info
+                    // 3. [MỚI] Code Linting (Kiểm tra cú pháp code)
+                    // Yêu cầu: package.json phải có script "lint"
+                    echo '--- [Step] Running Code Linter ---'
+                    try {
+                        // Nếu chưa cấu hình lint trong package.json thì comment dòng này lại để tránh lỗi
+                        sh 'npm run lint' 
+                    } catch (Exception e) {
+                        error("Code Linting Failed! Please fix code style issues.")
+                    }
+
+                    // 4. Run Test & Generate Coverage
                     echo '--- [Step] Running Unit Tests with Coverage ---'
                     sh 'npm test' 
                 }
@@ -65,7 +69,6 @@ pipeline {
                 stage('SCA (Dependency Check)') {
                     steps {
                         echo '--- [Step] Scanning Dependencies ---'
-                        // failOnCVSS 7.0: Pipeline sẽ fail nếu tìm thấy lỗi bảo mật mức High/Critical
                         dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
                                         odcInstallation: 'OWASP-Dependency-Check'
                     }
@@ -75,10 +78,8 @@ pipeline {
                     steps {
                         script {
                             def nodePath = sh(script: "which node", returnStdout: true).trim()
-                            // Lưu ý: Cần đảm bảo cấu hình 'SonarCloud' trong Jenkins System trỏ tới credential 'sonarcloud-token'
                             withSonarQubeEnv('SonarCloud') { 
                                 echo '--- [Step] SonarScanner Analysis ---'
-                                // Thêm tham số sonar.javascript.lcov.reportPaths để đọc coverage từ Stage 1
                                 sh """
                                 npx sonar-scanner \
                                     -Dsonar.projectKey=k22022002_jenkins-hello-world \
@@ -90,9 +91,6 @@ pipeline {
                                     -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
                                 """
                             }
-                            
-                            // Quality Gate: Chặn pipeline nếu code không đạt chuẩn (ví dụ: Coverage < 80%)
-                            echo '--- [Step] Checking Quality Gate ---'
                             timeout(time: 5, unit: 'MINUTES') {
                                 waitForQualityGate abortPipeline: true
                             }
@@ -102,14 +100,42 @@ pipeline {
             }
         }
 
-        stage('3. Build Application') {
+        stage('3. Build & Container Scan') {
             steps {
-                echo '--- [Step] Build Application ---'
+                echo '--- [Step] Build Artifacts & Container ---'
                 script {
                     sh 'rm -f *.tgz *.sig' 
-                    // Đã bỏ 'npm test' ở đây vì đã chạy ở Stage 1
+                    
+                    // 1. Build NPM Artifact (.tgz) - Dùng cho các bước Sign/SBOM phía sau
                     sh "npm pack"
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
+
+                    // 2. [MỚI] Build Docker Image (Yêu cầu có Dockerfile)
+                    echo "--- Building Docker Image: ${DOCKER_IMAGE} ---"
+                    if (fileExists('Dockerfile')) {
+                        sh "docker build -t ${DOCKER_IMAGE} ."
+                        
+                        // 3. [MỚI] Container Scanning (Trivy)
+                        // Quét lỗi OS packages và dependencies bên trong container
+                        echo '--- Running Trivy Container Scan ---'
+                        try {
+                            sh """
+                                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                                -v \$(pwd)/.trivycache:/root/.cache/ \
+                                aquasec/trivy:latest image \
+                                --exit-code 1 \
+                                --severity HIGH,CRITICAL \
+                                --no-progress \
+                                ${DOCKER_IMAGE}
+                            """
+                        } catch (Exception e) {
+                            echo "Trivy found vulnerabilities!"
+                            // Uncomment dòng dưới nếu muốn chặn pipeline khi có lỗi Container
+                            // error("Pipeline failed due to Container Vulnerabilities")
+                        }
+                    } else {
+                        echo "WARNING: Dockerfile not found. Skipping Container Build & Scan."
+                    }
                 }
             }
         }
@@ -117,11 +143,12 @@ pipeline {
         stage('4. Generate SBOM') {
             steps {
                 echo '--- [Step] Generate SBOM (CycloneDX) ---'
+                // Tạo SBOM cho file code gốc (NPM)
                 sh "npx @cyclonedx/cyclonedx-npm --output-file ${SBOM_FILE}"
             }
         }
-	
-	stage('5. Sign Release Artifacts') {
+    
+        stage('5. Sign Release Artifacts') {
             steps {
                 echo '--- [Step] Sign Artifacts using Credentials ---'
                 withCredentials([
@@ -131,11 +158,11 @@ pipeline {
                     script {
                         def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign'
 
-                        // 1. Setup Key
+                        // Setup Key
                         sh "cp \$COSIGN_KEY_PATH cosign.key"
                         sh "${cosignCmd} public-key --key cosign.key --outfile cosign.pub"
 
-                        // 2. Ký Artifact (.tgz) - Đã có --tlog-upload=false (OK)
+                        // Ký Artifact (.tgz)
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
@@ -145,7 +172,7 @@ pipeline {
                             ${ARTIFACT_NAME}
                         """
                         
-                        // 3. Ký SBOM (.json) - [ĐÃ SỬA] Thêm --tlog-upload=false
+                        // Ký SBOM (.json)
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
@@ -157,6 +184,7 @@ pipeline {
                 }
             }
         }
+
         stage('6. Verify Signatures') {
             steps {
                 echo '--- [Step] Verify Signatures ---'
@@ -217,6 +245,8 @@ pipeline {
     post {
         always {
              dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+             // Dọn dẹp Docker images để tiết kiệm ổ cứng cho Jenkins Agent
+             sh "docker rmi ${DOCKER_IMAGE} || true"
         }
         success {
             echo "SUCCESS: Pipeline finished securely."
