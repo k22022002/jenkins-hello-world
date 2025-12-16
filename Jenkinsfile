@@ -32,7 +32,7 @@ pipeline {
                     '''
                     
                     // 2. Install Dependencies
-                    sh 'npm install'
+                    sh 'npm ci'
 
                     // 3. [MỚI] Code Linting (Kiểm tra cú pháp code)
                     // Yêu cầu: package.json phải có script "lint"
@@ -113,7 +113,7 @@ pipeline {
                     // 2. [MỚI] Build Docker Image (Yêu cầu có Dockerfile)
                     echo "--- Building Docker Image: ${DOCKER_IMAGE} ---"
                     if (fileExists('Dockerfile')) {
-                        sh "docker build -t ${DOCKER_IMAGE} ."
+                        sh "docker build --no-cache -t ${DOCKER_IMAGE} ."
                         
                         // 3. [MỚI] Container Scanning (Trivy)
                         // Quét lỗi OS packages và dependencies bên trong container
