@@ -120,13 +120,17 @@ pipeline {
                         echo '--- Running Trivy Container Scan ---'
                         try {
                             sh """
-                                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                                -v \$(pwd)/.trivycache:/root/.cache/ \
-                                aquasec/trivy:latest image \
-                                --exit-code 1 \
-                                --severity HIGH,CRITICAL \
-                                --no-progress \
-                                ${DOCKER_IMAGE}
+				# Xóa cache cũ đi cho chắc
+   				 rm -rf .trivycache
+    
+   				 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+    				 -v \$(pwd)/.trivycache:/root/.cache/ \
+    				 aquasec/trivy:latest image \
+    				 --exit-code 1 \
+    				 --severity HIGH,CRITICAL \
+    				 --no-progress \
+   				 --scanners vuln \
+   				 ${DOCKER_IMAGE}
                             """
                         } catch (Exception e) {
                             echo "Trivy found vulnerabilities!"

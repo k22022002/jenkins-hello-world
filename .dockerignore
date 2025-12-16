@@ -1,0 +1,25 @@
+# 1. Cực kỳ quan trọng: Không cho Docker lấy node_modules từ ngoài vào
+node_modules
+
+# 2. Chặn file cosign và các file thực thi không liên quan (Fix lỗi Golang)
+cosign
+cosign.pub
+cosign.key
+cosign.bundle
+*.exe
+*.sh
+
+# 3. Chặn các file artifact do Jenkins tạo ra
+*.tgz
+*.sig
+*.json
+dependency-check-report.html
+dependency-check-report.xml
+coverage/
+
+# 4. Chặn git và log
+.git
+.gitignore
+*.log
+Dockerfile
+Jenkinsfile
