@@ -2,33 +2,25 @@
 const express = require('express');
 const app = express();
 
-// Lấy port từ biến môi trường (Docker sẽ truyền vào) hoặc dùng 3000
 const PORT = process.env.PORT || 3000;
 
-// Logic nghiệp vụ (Tách ra để dễ Unit Test)
 function hello() {
     return "Hello Jenkins";
 }
 
-// Định nghĩa đường dẫn gốc (Route)
+// Route này trước đây chưa được test, giờ sẽ được test
 app.get('/', (req, res) => {
-    res.send(hello());
+    res.status(200).send(hello());
 });
 
-// QUAN TRỌNG: Chỉ khởi động server khi file này được chạy trực tiếp
-// (Để khi chạy Unit Test, nó không tự mở port gây lỗi)
+// Chỉ chạy server khi file được gọi trực tiếp (node src/index.js)
+// Khi Jest import file này, đoạn code trong if sẽ KHÔNG chạy (tránh lỗi Port in use)
+/* istanbul ignore next */ 
 if (require.main === module) {
     const server = app.listen(PORT, () => {
         console.log(`App is listening on port ${PORT}`);
     });
-
-    // Xử lý tắt server gọn gàng (Graceful Shutdown) cho Docker
-    process.on('SIGTERM', () => {
-        server.close(() => {
-            console.log('Process terminated');
-        });
-    });
 }
 
-// Export cả hàm hello (để test logic) và app (nếu muốn test integration sau này)
-module.exports = hello;
+// Export dạng Object để test file có thể lấy cả app và hello
+module.exports = { app, hello };

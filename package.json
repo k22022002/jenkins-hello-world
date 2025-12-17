@@ -13,11 +13,12 @@
   "devDependencies": {
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
-    "jest-junit": "^16.0.0"
+    "jest-junit": "^16.0.0",
+    "supertest": "^7.1.4"
   },
   "jest": {
     "collectCoverage": true,
-    "coverageProvider": "v8", 
+    "coverageProvider": "v8",
     "coverageDirectory": "coverage",
     "coverageReporters": [
       "lcov",
@@ -25,8 +26,8 @@
     ]
   },
   "dependencies": {
-    "express": "^4.19.2",
     "cross-spawn": "^7.0.5",
+    "express": "^4.19.2",
     "glob": "^10.5.0"
   },
   "overrides": {
