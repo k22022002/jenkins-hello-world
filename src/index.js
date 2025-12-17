@@ -3,8 +3,8 @@ const express = require('express');
 const app = express();
 
 // --- [FIX BẢO MẬT] ---
-// Tắt header này để SonarQube không báo lỗi "Security Hotspot" (như trong ảnh image_dc1852.png)
-// Giúp che giấu thông tin server đang dùng Express
+// Tắt header này để hacker không biết server dùng Express
+// Đây là fix cho lỗi trong ảnh image_dc1852.png
 app.disable('x-powered-by'); 
 
 const PORT = process.env.PORT || 3000;
@@ -18,9 +18,9 @@ app.get('/', (req, res) => {
     res.status(200).send(hello());
 });
 
-// --- [TĂNG COVERAGE] ---
-// Dòng comment đặc biệt này bảo Jest: "Đừng tính coverage cho khối if này"
-// Vì đây là code khởi động server, Unit Test không chạy qua đây nên coverage bị thấp.
+// --- [TĂNG COVERAGE LÊN 100%] ---
+// Dòng comment này bảo Jest: "Bỏ qua coverage cho khối if này"
+// Vì đây là đoạn khởi động server, Unit test không chạy qua nên coverage bị thấp.
 /* istanbul ignore next */ 
 if (require.main === module) {
     const server = app.listen(PORT, () => {
