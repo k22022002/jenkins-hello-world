@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="1" failures="0" errors="0" time="1.953">
+  <testsuite name="Jenkins Hello World App" errors="0" failures="0" skipped="0" timestamp="2025-12-17T02:35:41" time="1.807" tests="1">
+    <testcase classname="Jenkins Hello World App Hàm hello phải trả về &quot;Hello Jenkins&quot;" name="Jenkins Hello World App Hàm hello phải trả về &quot;Hello Jenkins&quot;" time="0.008">
+    </testcase>
+  </testsuite>
+</testsuites>
