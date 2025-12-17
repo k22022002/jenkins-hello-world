@@ -2,9 +2,9 @@
   "name": "jenkins-hello-world",
   "version": "1.0.0",
   "description": "Simple project for Jenkins testing",
-  "main": "src/index.js",
+  "main": "src/server.js", 
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/server.js",
     "test": "jest --coverage --reporters=default --reporters=jest-junit",
     "lint": "eslint src/**/*.js"
   },
@@ -20,6 +20,9 @@
     "collectCoverage": true,
     "coverageProvider": "v8",
     "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "src/index.js"
+    ],
     "coverageReporters": [
       "lcov",
       "text"
