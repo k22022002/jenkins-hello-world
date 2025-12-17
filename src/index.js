@@ -2,19 +2,21 @@
 const express = require('express');
 const app = express();
 
+// --- [THÊM DÒNG NÀY] ---
+// Tắt header 'X-Powered-By' để hacker không biết mình dùng Express
+app.disable('x-powered-by'); 
+// -----------------------
+
 const PORT = process.env.PORT || 3000;
 
 function hello() {
     return "Hello Jenkins";
 }
 
-// Route này trước đây chưa được test, giờ sẽ được test
 app.get('/', (req, res) => {
     res.status(200).send(hello());
 });
 
-// Chỉ chạy server khi file được gọi trực tiếp (node src/index.js)
-// Khi Jest import file này, đoạn code trong if sẽ KHÔNG chạy (tránh lỗi Port in use)
 /* istanbul ignore next */ 
 if (require.main === module) {
     const server = app.listen(PORT, () => {
@@ -22,5 +24,4 @@ if (require.main === module) {
     });
 }
 
-// Export dạng Object để test file có thể lấy cả app và hello
 module.exports = { app, hello };
