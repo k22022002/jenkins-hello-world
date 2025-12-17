@@ -4,6 +4,7 @@
   "description": "Simple project for Jenkins testing",
   "main": "src/index.js",
   "scripts": {
+    "start": "node src/index.js",
     "test": "jest --coverage --reporters=default --reporters=jest-junit",
     "lint": "eslint src/**/*.js"
   },
@@ -23,6 +24,7 @@
     ]
   },
   "dependencies": {
+    "express": "^4.19.2",
     "cross-spawn": "^7.0.5",
     "glob": "^10.5.0"
   },

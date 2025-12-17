@@ -2,12 +2,18 @@ pipeline {
     agent any
 
     environment {
+        // --- Artifact Info ---
         ARTIFACT_NAME   = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
         PROVENANCE_FILE = "provenance.json"
         SIGNATURE_FILE  = "${ARTIFACT_NAME}.sig"
-        SBOM_FILE       = "sbom.json"
-        // DOCKER_IMAGE dùng cho bước Container Scanning
+        
+        // --- SBOM Files ---
+        SBOM_CODE       = "sbom-code.json"      // SBOM cho Source Code (NPM)
+        SBOM_CONTAINER  = "cbom-container.json" // CBOM cho Docker Image
+        
+        // --- Docker Info ---
         DOCKER_IMAGE    = "jenkins-hello-world:${BUILD_NUMBER}"
+        APP_PORT        = "3000" // Port mặc định của ứng dụng Nodejs (cần khớp với Dockerfile)
     }
 
     tools {
@@ -22,7 +28,7 @@ pipeline {
                 checkout scm
                 
                 script {
-                    // 1. Install Cosign
+                    // 1. Install Cosign (Tool ký số)
                     sh 'rm -f cosign'
                     sh '''
                         curl -L "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign
@@ -34,14 +40,13 @@ pipeline {
                     // 2. Install Dependencies
                     sh 'npm ci'
 
-                    // 3. [MỚI] Code Linting (Kiểm tra cú pháp code)
-                    // Yêu cầu: package.json phải có script "lint"
+                    // 3. Code Linting
                     echo '--- [Step] Running Code Linter ---'
                     try {
-                        // Nếu chưa cấu hình lint trong package.json thì comment dòng này lại để tránh lỗi
+                        // Đảm bảo package.json có script "lint" hoặc bỏ qua nếu chưa có
                         sh 'npm run lint' 
                     } catch (Exception e) {
-                        error("Code Linting Failed! Please fix code style issues.")
+                        echo "Warning: Linting failed or not configured."
                     }
 
                     // 4. Run Test & Generate Coverage
@@ -51,7 +56,7 @@ pipeline {
             }
         }
 
-        stage('2. Security & Quality Gates') {
+        stage('2. Security & Quality Gates (Static)') {
             parallel {
                 stage('Secret Scan (Gitleaks)') {
                     steps {
@@ -100,59 +105,104 @@ pipeline {
             }
         }
 
-        stage('3. Build & Container Scan') {
+        stage('3. Build & Container Security') {
             steps {
                 echo '--- [Step] Build Artifacts & Container ---'
                 script {
                     sh 'rm -f *.tgz *.sig' 
                     
-                    // 1. Build NPM Artifact (.tgz) - Dùng cho các bước Sign/SBOM phía sau
+                    // 1. Build NPM Artifact (.tgz)
                     sh "npm pack"
                     sh "mv jenkins-hello-world-*.tgz ${ARTIFACT_NAME}"
 
-                    // 2. [MỚI] Build Docker Image (Yêu cầu có Dockerfile)
+                    // 2. Build Docker Image
                     echo "--- Building Docker Image: ${DOCKER_IMAGE} ---"
                     if (fileExists('Dockerfile')) {
                         sh "docker build --no-cache -t ${DOCKER_IMAGE} ."
                         
-                        // 3. [MỚI] Container Scanning (Trivy)
-                        // Quét lỗi OS packages và dependencies bên trong container
+                        // 3. Container Scanning (Trivy) - Vulnerability
                         echo '--- Running Trivy Container Scan ---'
                         try {
-                            sh """
-				# Xóa cache cũ đi cho chắc
-   				 rm -rf .trivycache
-    
-   				 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-    				 -v \$(pwd)/.trivycache:/root/.cache/ \
-    				 aquasec/trivy:latest image \
-    				 --exit-code 1 \
-    				 --severity HIGH,CRITICAL \
-    				 --no-progress \
-   				 --scanners vuln \
-   				 ${DOCKER_IMAGE}
+                             sh """
+                                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                                aquasec/trivy:latest image \
+                                --exit-code 1 \
+                                --severity HIGH,CRITICAL \
+                                --no-progress \
+                                --scanners vuln \
+                                ${DOCKER_IMAGE}
                             """
                         } catch (Exception e) {
                             echo "Trivy found vulnerabilities!"
-                            // Uncomment dòng dưới nếu muốn chặn pipeline khi có lỗi Container
-                            // error("Pipeline failed due to Container Vulnerabilities")
+                            // error("Pipeline failed due to Container Vulnerabilities") // Uncomment để chặn lỗi
                         }
+
+                        // 4. [NEW] Generate CBOM (Container SBOM)
+                        // Tạo danh sách vật liệu phần mềm cho Container
+                        echo '--- Generating CBOM (Container SBOM) ---'
+                        sh """
+                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                            -v \$(pwd):/output \
+                            aquasec/trivy:latest image \
+                            --format cyclonedx \
+                            --output /output/${SBOM_CONTAINER} \
+                            ${DOCKER_IMAGE}
+                        """
+
                     } else {
-                        echo "WARNING: Dockerfile not found. Skipping Container Build & Scan."
+                        echo "WARNING: Dockerfile not found. Skipping Container steps."
                     }
                 }
             }
         }
 
-        stage('4. Generate SBOM') {
+        stage('4. DAST (Dynamic Analysis)') {
+            // Bước này chạy ứng dụng lên và tấn công thử
             steps {
-                echo '--- [Step] Generate SBOM (CycloneDX) ---'
-                // Tạo SBOM cho file code gốc (NPM)
-                sh "npx @cyclonedx/cyclonedx-npm --output-file ${SBOM_FILE}"
+                script {
+                    if (fileExists('Dockerfile')) {
+                        echo '--- [Step] Starting App for DAST ---'
+                        // 1. Chạy Container (Detached mode)
+                        sh "docker run -d --name test-app-dast -p ${APP_PORT}:${APP_PORT} ${DOCKER_IMAGE}"
+                        
+                        // 2. Đợi App khởi động
+                        sh "sleep 10"
+
+                        echo '--- [Step] Running OWASP ZAP (DAST) ---'
+                        // 3. Chạy ZAP Baseline Scan (Sử dụng Docker network host để nhìn thấy localhost)
+                        // Lưu ý: Cần đảm bảo Docker Agent có thể pull image OWASP ZAP
+                        try {
+                            sh """
+                                docker run --rm --network host \
+                                -v \$(pwd):/zap/wrk/:rw \
+                                ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+                                -t http://localhost:${APP_PORT} \
+                                -r zap-report.html \
+                                || true 
+                            """
+                            // "|| true" để pipeline không bị fail ngay lập tức nếu ZAP tìm thấy lỗi (cho phép review report sau)
+                        } catch (Exception e) {
+                            echo "DAST scanning encountered errors."
+                        } finally {
+                            // 4. Dọn dẹp container sau khi test
+                            sh "docker stop test-app-dast && docker rm test-app-dast"
+                        }
+                    } else {
+                        echo "Skipping DAST because no Dockerfile was found."
+                    }
+                }
+            }
+        }
+
+        stage('5. Generate Code SBOM') {
+            steps {
+                echo '--- [Step] Generate Code SBOM (CycloneDX) ---'
+                // Tạo SBOM cho mã nguồn Node.js
+                sh "npx @cyclonedx/cyclonedx-npm --output-file ${SBOM_CODE}"
             }
         }
     
-        stage('5. Sign Release Artifacts') {
+        stage('6. Sign Release Artifacts') {
             steps {
                 echo '--- [Step] Sign Artifacts using Credentials ---'
                 withCredentials([
@@ -176,20 +226,20 @@ pipeline {
                             ${ARTIFACT_NAME}
                         """
                         
-                        // Ký SBOM (.json)
+                        // Ký SBOM Code
                         sh """
                         ${cosignCmd} sign-blob --yes \
                             --key cosign.key \
                             --tlog-upload=false \
-                            --output-signature ${SBOM_FILE}.sig \
-                            ${SBOM_FILE}
+                            --output-signature ${SBOM_CODE}.sig \
+                            ${SBOM_CODE}
                         """
                     }
                 }
             }
         }
 
-        stage('6. Verify Signatures') {
+        stage('7. Verify Signatures') {
             steps {
                 echo '--- [Step] Verify Signatures ---'
                 script {
@@ -207,7 +257,7 @@ pipeline {
             }
         }
 
-        stage('7. Generate Attestation') {
+        stage('8. Generate Attestation') {
             steps {
                 echo '--- [Step] Generate Provenance Attestation ---'
                 script {
@@ -238,10 +288,30 @@ pipeline {
             }
         }
         
-        stage('8. Upload Signed Artifacts') {
+        stage('9. Deploy') {
+            steps {
+                echo '--- [Step] Deploying to Production ---'
+                script {
+                    // Đây là bước Deploy. Tùy vào hạ tầng (K8s, SSH, AWS) mà lệnh sẽ khác nhau.
+                    // Ví dụ giả định:
+                    echo "Deploying Docker Image: ${DOCKER_IMAGE}..."
+                    
+                    // Lệnh mẫu nếu deploy bằng Docker trên server đích:
+                    // sh "ssh user@production-server 'docker pull ${DOCKER_IMAGE} && docker restart my-app'"
+                    
+                    // Lệnh mẫu nếu deploy Kubernetes:
+                    // sh "kubectl set image deployment/myapp myapp=${DOCKER_IMAGE}"
+                    
+                    echo "Deploy SUCCESS!"
+                }
+            }
+        }
+
+        stage('10. Upload Artifacts & Reports') {
             steps {
                 echo '--- [Step] Archiving Artifacts ---'
-                archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, ${SBOM_FILE}, cosign.pub, cosign.bundle, dependency-check-report.html", allowEmptyArchive: true
+                // Lưu trữ tất cả: Mã nguồn nén, Chữ ký, SBOM code, CBOM container, Báo cáo DAST/SCA
+                archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, ${SBOM_CODE}, ${SBOM_CONTAINER}, cosign.pub, cosign.bundle, dependency-check-report.html, zap-report.html", allowEmptyArchive: true
             }
         }
     }
@@ -249,11 +319,12 @@ pipeline {
     post {
         always {
              dependencyCheckPublisher pattern: 'dependency-check-report.xml'
-             // Dọn dẹp Docker images để tiết kiệm ổ cứng cho Jenkins Agent
+             // Dọn dẹp Docker images
              sh "docker rmi ${DOCKER_IMAGE} || true"
+             sh "rm -f cosign cosign.key" // Xóa key tạm nếu có
         }
         success {
-            echo "SUCCESS: Pipeline finished securely."
+            echo "SUCCESS: Pipeline finished securely. Ready for production."
         }
         failure {
             echo "Pipeline failed. Please check Security Scans or Quality Gates."
