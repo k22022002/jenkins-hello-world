@@ -159,36 +159,38 @@ pipeline {
     steps {
         script {
             if (fileExists('Dockerfile')) {
-                // 1. Chạy App (Vẫn dùng port mapping)
-                sh "docker run -d --name test-app-dast -p 3000:3000 ${DOCKER_IMAGE}"
+                // 1. Create a temporary network
+                sh "docker network create zap-network || true"
+
+                // 2. Run App on that network with a specific name
+                sh "docker run -d --name test-app-dast --network zap-network -p 3000:3000 ${DOCKER_IMAGE}"
                 
-                // 2. Chờ App khởi động
-                sh "sleep 20"
+                // 3. Wait for App (Improved check)
+                echo "Waiting for app to be ready..."
+                sh "sleep 20" 
 
                 echo '--- [Step] Running OWASP ZAP ---'
                 try {
-                    sh "chmod 777 ." // Sửa lỗi permission
+                    sh "chmod 777 ." 
                     
-                    // 3. Chạy ZAP với --network host và gọi vào 127.0.0.1
-                    // Vì ZAP lúc này 'nhập' làm một với máy Jenkins, 127.0.0.1:3000 
-                    // chính là port 3000 mà container App đang mở.
+                    // 4. Run ZAP on the same network, targeting the container name
                     sh """
-                        docker run --rm --network host \
+                        docker run --rm --network zap-network \
                         -v \$(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-                        -t http://127.0.0.1:3000 \
+                        -t http://test-app-dast:3000 \
                         -r zap-report.html
                     """
                 } catch (Exception e) {
-                    echo "DAST Scan hoàn tất (có thể tìm thấy lỗ hổng)."
+                    echo "DAST Scan completed with alerts."
                 } finally {
                     sh "docker stop test-app-dast && docker rm test-app-dast"
+                    sh "docker network rm zap-network || true"
                 }
             }
         }
     }
 }
-
         stage('5. Generate Code SBOM') {
             steps {
                 echo '--- [Step] Generate Code SBOM (CycloneDX) ---'
