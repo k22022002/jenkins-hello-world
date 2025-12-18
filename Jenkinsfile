@@ -158,6 +158,9 @@ pipeline {
 stage('4. DAST (Dynamic Analysis)') {
             steps {
                 script {
+		    echo "--- Dọn dẹp môi trường cũ (nếu có) ---"
+            // Thêm dòng này để xóa container cũ trước khi tạo mới
+            sh "docker rm -f test-app-dast || true"
                     echo "--- Khởi chạy App để quét DAST ---"
                     // Chạy container ứng dụng
                     sh "docker run -d --name test-app-dast -p ${APP_PORT}:${APP_PORT} ${DOCKER_IMAGE}"
