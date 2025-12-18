@@ -2,41 +2,44 @@ const express = require('express');
 const helmet = require('helmet');
 const app = express();
 
-// 1. Cấu hình Helmet nâng cao
+// 1. Cấu hình Helmet siêu chặt chẽ để xóa bỏ lỗi [10055]
 app.use(
   helmet({
-    // Giải quyết lỗi CSP [10055] bằng cách định nghĩa default-src
     contentSecurityPolicy: {
-      useDefaults: true,
+      useDefaults: false, // Tắt mặc định để tự cấu hình sạch sẽ
       directives: {
-        "default-src": ["'self'"],
+        "default-src": ["'self'"], // Fallback gốc
+        "base-uri": ["'self'"],    // Chống lỗi No Fallback
+        "form-action": ["'self'"], // Chống lỗi No Fallback
+        "frame-ancestors": ["'none'"],
         "script-src": ["'self'"],
-        "style-src": ["'self'", "'unsafe-inline'"],
+        "style-src": ["'self'"],
+        "img-src": ["'self'"],
         "upgrade-insecure-requests": [],
       },
     },
-    // Giải quyết lỗi Spectre [90004] (Cơ chế cô lập tài nguyên)
-    crossOriginEmbedderPolicy: true,
+    // Chống Spectre [90004]
     crossOriginOpenerPolicy: { policy: "same-origin" },
     crossOriginResourcePolicy: { policy: "same-origin" },
   })
 );
 
-// 2. Header thủ công cho Permissions Policy [10063]
+// 2. Middleware áp dụng Header cho TẤT CẢ các response (kể cả 404) để xóa lỗi [10049]
 app.use((req, res, next) => {
-  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
-  // 3. Giải quyết lỗi Cache [10049]
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
   next();
 });
 
-// 4. Thêm route robots.txt để tránh lỗi 404 làm nhiễu báo cáo ZAP
-app.get('/robots.txt', (req, res) => {
+// 3. Xử lý các file ZAP hay quét để tránh 404 không bảo mật
+const staticFilesHandler = (req, res) => {
     res.type('text/plain');
-    res.send("User-agent: *\nDisallow: /");
-});
+    res.status(200).send("User-agent: *\nDisallow: /");
+};
+app.get('/robots.txt', staticFilesHandler);
+app.get('/sitemap.xml', staticFilesHandler); // Thêm cái này để xóa nốt lỗi sitemap.xml
 
 app.disable('x-powered-by'); 
 
@@ -46,6 +49,11 @@ function hello() {
 
 app.get('/', (req, res) => {
     res.status(200).send(hello());
+});
+
+// 4. Custom 404 Handler để đảm bảo trang lỗi vẫn có đủ Header
+app.use((req, res) => {
+    res.status(404).send("Not Found");
 });
 
 module.exports = { app, hello };

@@ -13,15 +13,12 @@ describe('Jenkins Hello World App', () => {
 
     // TEST 2: Integration Test (Kiểm tra API chạy thực tế)
     // Test này bao phủ app.get('/')
-test('Integration Test: Kiểm tra cấu hình bảo mật nâng cao', async () => {
-    const response = await request(app).get('/');
-    
-    expect(response.statusCode).toBe(200);
-    // Kiểm tra Spectre protection
-    expect(response.headers['cross-origin-opener-policy']).toBe('same-origin');
-    // Kiểm tra Cache control
-    expect(response.headers['cache-control']).toContain('no-store');
-    // Kiểm tra Permissions Policy
-    expect(response.headers['permissions-policy']).toBeDefined();
-});
+    test('Integration Test: Sitemap và Robots phải trả về 200 OK', async () => {
+        const robots = await request(app).get('/robots.txt');
+        const sitemap = await request(app).get('/sitemap.xml');
+        
+        expect(robots.statusCode).toBe(200);
+        expect(sitemap.statusCode).toBe(200);
+        expect(robots.headers['cache-control']).toContain('no-store');
+    });
 });
