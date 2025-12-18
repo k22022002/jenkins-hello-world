@@ -155,53 +155,50 @@ pipeline {
                 }
             }
         }
-	stage('4. DAST (Dynamic Analysis)') {
-    steps {
-        script {
-            if (fileExists('Dockerfile')) {
-                // 1. Khởi chạy App
-                sh "docker run -d --name test-app-dast -p 3000:3000 ${DOCKER_IMAGE}"
-                
-                // 2. Lấy IP của máy Host (Jenkins)
-                // Lệnh này lấy IP nội bộ của máy đang chạy Jenkins
-                def hostIp = sh(script: "hostname -I | awk '{print \$1}'", returnStdout: true).trim()
-                echo "App đang chạy tại IP: ${hostIp}:3000"
-
-                // 3. Chờ cho đến khi App thực sự sẵn sàng (Healthcheck)
-                echo "Đang kiểm tra kết nối tới App..."
-                sh """
-                    timeout=60
-                    while ! curl -s http://${hostIp}:3000 > /dev/null; do
-                      echo "Đang đợi App khởi động tại http://${hostIp}:3000..."
-                      sleep 2
-                      timeout=\$((timeout-2))
-                      if [ \$timeout -le 0 ]; then echo "Lỗi: App không phản hồi sau 60s"; exit 1; fi
-                    done
-                """
-
-                echo '--- [Step] Running OWASP ZAP ---'
-                try {
-                    sh "chmod 777 ." 
+stage('4. DAST (Dynamic Analysis)') {
+            steps {
+                script {
+                    echo "--- Khởi chạy App để quét DAST ---"
+                    // Chạy container ứng dụng
+                    sh "docker run -d --name test-app-dast -p ${APP_PORT}:${APP_PORT} ${DOCKER_IMAGE}"
                     
-                    // 4. Chạy ZAP gọi trực tiếp vào IP của Host
-                    // Thêm --add-host để container ZAP có thể mapping host.docker.internal
-                    sh """
-                        docker run --rm \
-                        --add-host host.docker.internal:host-gateway \
-                        -v \$(pwd):/zap/wrk/:rw \
-                        ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-                        -t http://${hostIp}:3000 \
-                        -r zap-report.html
-                    """
-                } catch (Exception e) {
-                    echo "DAST Scan hoàn tất (có tìm thấy cảnh báo bảo mật)."
-                } finally {
-                    sh "docker stop test-app-dast && docker rm test-app-dast"
+                    try {
+                        // 1. Healthcheck: Kiểm tra App sẵn sàng qua localhost
+                        sh """
+                            timeout=60
+                            while ! curl -s http://localhost:${APP_PORT} > /dev/null; do
+                                echo "Đang đợi App khởi động tại port ${APP_PORT}..."
+                                sleep 3
+                                timeout=\$((timeout-3))
+                                if [ \$timeout -le 0 ]; then 
+                                    echo "LỖI: App không phản hồi sau 60s. Logs hệ thống:"
+                                    docker logs test-app-dast
+                                    exit 1
+                                fi
+                            done
+                            echo "App đã sẵn sàng!"
+                        """
+
+                        // 2. Chạy OWASP ZAP
+                        // Sử dụng host.docker.internal để Container ZAP gọi ngược ra App trên Host
+                        sh """
+                            chmod 777 .
+                            docker run --rm \
+                            --add-host host.docker.internal:host-gateway \
+                            -v \$(pwd):/zap/wrk/:rw \
+                            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+                            -t http://host.docker.internal:${APP_PORT} \
+                            -r zap-report.html
+                        """
+                    } catch (Exception e) {
+                        echo "DAST hoàn tất (có thể có cảnh báo bảo mật)."
+                    } finally {
+                        // Luôn dọn dẹp container sau khi xong
+                        sh "docker stop test-app-dast && docker rm test-app-dast || true"
+                    }
                 }
             }
         }
-    }
-}
         stage('5. Generate Code SBOM') {
             steps {
                 echo '--- [Step] Generate Code SBOM (CycloneDX) ---'

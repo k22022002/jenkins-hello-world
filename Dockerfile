@@ -35,4 +35,4 @@ USER node
 EXPOSE 3000
 
 # 11. Chạy ứng dụng qua dumb-init
-CMD ["dumb-init", "node", "src/index.js"]
+CMD ["dumb-init", "node", "src/server.js"]
