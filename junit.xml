@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="jest tests" tests="2" failures="0" errors="0" time="1.925">
-  <testsuite name="Jenkins Hello World App" errors="0" failures="0" skipped="0" timestamp="2025-12-17T07:20:39" time="1.767" tests="2">
+<testsuites name="jest tests" tests="2" failures="0" errors="0" time="2.378">
+  <testsuite name="Jenkins Hello World App" errors="0" failures="0" skipped="0" timestamp="2025-12-18T07:15:37" time="2.223" tests="2">
     <testcase classname="Jenkins Hello World App Unit Test: Hàm hello phải trả về &quot;Hello Jenkins&quot;" name="Jenkins Hello World App Unit Test: Hàm hello phải trả về &quot;Hello Jenkins&quot;" time="0.007">
     </testcase>
-    <testcase classname="Jenkins Hello World App Integration Test: GET / phải trả về status 200" name="Jenkins Hello World App Integration Test: GET / phải trả về status 200" time="0.178">
+    <testcase classname="Jenkins Hello World App Integration Test: Kiểm tra các Security Headers" name="Jenkins Hello World App Integration Test: Kiểm tra các Security Headers" time="0.069">
     </testcase>
   </testsuite>
 </testsuites>

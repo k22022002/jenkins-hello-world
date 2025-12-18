@@ -1,5 +1,8 @@
 const express = require('express');
+const helmet = require('helmet');
 const app = express();
+// Sử dụng helmet để fix các lỗi ZAP vừa quét thấy
+app.use(helmet());
 
 // Fix lỗi bảo mật
 app.disable('x-powered-by'); 

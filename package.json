@@ -31,7 +31,8 @@
   "dependencies": {
     "cross-spawn": "^7.0.5",
     "express": "^4.19.2",
-    "glob": "^10.5.0"
+    "glob": "^10.5.0",
+    "helmet": "^8.1.0"
   },
   "overrides": {
     "js-yaml": "^4.1.0",
