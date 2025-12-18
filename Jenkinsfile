@@ -159,33 +159,44 @@ pipeline {
     steps {
         script {
             if (fileExists('Dockerfile')) {
-                // 1. Create a temporary network
-                sh "docker network create zap-network || true"
-
-                // 2. Run App on that network with a specific name
-                sh "docker run -d --name test-app-dast --network zap-network -p 3000:3000 ${DOCKER_IMAGE}"
+                // 1. Khởi chạy App
+                sh "docker run -d --name test-app-dast -p 3000:3000 ${DOCKER_IMAGE}"
                 
-                // 3. Wait for App (Improved check)
-                echo "Waiting for app to be ready..."
-                sh "sleep 20" 
+                // 2. Lấy IP của máy Host (Jenkins)
+                // Lệnh này lấy IP nội bộ của máy đang chạy Jenkins
+                def hostIp = sh(script: "hostname -I | awk '{print \$1}'", returnStdout: true).trim()
+                echo "App đang chạy tại IP: ${hostIp}:3000"
+
+                // 3. Chờ cho đến khi App thực sự sẵn sàng (Healthcheck)
+                echo "Đang kiểm tra kết nối tới App..."
+                sh """
+                    timeout=60
+                    while ! curl -s http://${hostIp}:3000 > /dev/null; do
+                      echo "Đang đợi App khởi động tại http://${hostIp}:3000..."
+                      sleep 2
+                      timeout=\$((timeout-2))
+                      if [ \$timeout -le 0 ]; then echo "Lỗi: App không phản hồi sau 60s"; exit 1; fi
+                    done
+                """
 
                 echo '--- [Step] Running OWASP ZAP ---'
                 try {
                     sh "chmod 777 ." 
                     
-                    // 4. Run ZAP on the same network, targeting the container name
+                    // 4. Chạy ZAP gọi trực tiếp vào IP của Host
+                    // Thêm --add-host để container ZAP có thể mapping host.docker.internal
                     sh """
-                        docker run --rm --network zap-network \
+                        docker run --rm \
+                        --add-host host.docker.internal:host-gateway \
                         -v \$(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-                        -t http://test-app-dast:3000 \
+                        -t http://${hostIp}:3000 \
                         -r zap-report.html
                     """
                 } catch (Exception e) {
-                    echo "DAST Scan completed with alerts."
+                    echo "DAST Scan hoàn tất (có tìm thấy cảnh báo bảo mật)."
                 } finally {
                     sh "docker stop test-app-dast && docker rm test-app-dast"
-                    sh "docker network rm zap-network || true"
                 }
             }
         }
