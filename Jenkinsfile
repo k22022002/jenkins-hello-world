@@ -155,40 +155,40 @@ pipeline {
                 }
             }
         }
-
 	stage('4. DAST (Dynamic Analysis)') {
     steps {
         script {
             if (fileExists('Dockerfile')) {
-                echo '--- [Step] Starting App for DAST ---'
-                // Khởi chạy app
-                sh "docker run -d --name test-app-dast -p ${APP_PORT}:${APP_PORT} ${DOCKER_IMAGE}"
+                // 1. Chạy App (Vẫn dùng port mapping)
+                sh "docker run -d --name test-app-dast -p 3000:3000 ${DOCKER_IMAGE}"
                 
-                // Chờ app khởi động (Tăng lên 15-20s nếu cần)
-                sh "sleep 15"
+                // 2. Chờ App khởi động
+                sh "sleep 20"
 
-                echo '--- [Step] Running OWASP ZAP (DAST) ---'
+                echo '--- [Step] Running OWASP ZAP ---'
                 try {
-                    // SỬA LỖI QUYỀN: Cấp quyền ghi cho mọi user vào thư mục hiện tại để ZAP xuất report
-                    sh "chmod 777 ."
-
+                    sh "chmod 777 ." // Sửa lỗi permission
+                    
+                    // 3. Chạy ZAP với --network host và gọi vào 127.0.0.1
+                    // Vì ZAP lúc này 'nhập' làm một với máy Jenkins, 127.0.0.1:3000 
+                    // chính là port 3000 mà container App đang mở.
                     sh """
                         docker run --rm --network host \
                         -v \$(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-                        -t http://192.168.12.190:${APP_PORT} \
+                        -t http://127.0.0.1:3000 \
                         -r zap-report.html
                     """
                 } catch (Exception e) {
-                    echo "DAST scanning encountered errors: ${e.message}"
+                    echo "DAST Scan hoàn tất (có thể tìm thấy lỗ hổng)."
                 } finally {
-                    // Trả lại quyền (tùy chọn) và dọn dẹp
                     sh "docker stop test-app-dast && docker rm test-app-dast"
                 }
             }
         }
     }
 }
+
         stage('5. Generate Code SBOM') {
             steps {
                 echo '--- [Step] Generate Code SBOM (CycloneDX) ---'
