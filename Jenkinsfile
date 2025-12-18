@@ -31,8 +31,7 @@ pipeline {
                     // 1. Install Cosign (Tool ký số)
                     sh 'rm -f cosign'
                     sh '''
-			curl -L --retry 5 --retry-delay 5 \
-                        "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" \
+			curl -L --retry 5 --retry-delay 5 "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" 
                         chmod +x cosign
                         export PATH=$PWD:$PATH
                         ./cosign version
