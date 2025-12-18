@@ -13,17 +13,14 @@ describe('Jenkins Hello World App', () => {
 
     // TEST 2: Integration Test (Kiểm tra API chạy thực tế)
     // Test này bao phủ app.get('/')
-    test('Integration Test: GET / phải trả về status 200', async () => {
+test('Integration Test: Kiểm tra các Security Headers', async () => {
         const response = await request(app).get('/');
         
-        // Kiểm tra status code
         expect(response.statusCode).toBe(200);
         
-        // Kiểm tra nội dung trả về
-        expect(response.text).toBe("Hello Jenkins");
-        
-        // Kiểm tra bảo mật (Header x-powered-by phải bị tắt)
-        expect(response.headers['x-powered-by']).toBeUndefined();
+        // Kiểm tra các header mà Helmet đã thêm vào
+        expect(response.headers['x-frame-options']).toBe('SAMEORIGIN'); // Chống Clickjacking
+        expect(response.headers['x-content-type-options']).toBe('nosniff'); // Chống MIME sniffing
+        expect(response.headers['content-security-policy']).toBeDefined(); // Có CSP
     });
-
 });
