@@ -156,44 +156,39 @@ pipeline {
             }
         }
 
-        stage('4. DAST (Dynamic Analysis)') {
-            // Bước này chạy ứng dụng lên và tấn công thử
-            steps {
-                script {
-                    if (fileExists('Dockerfile')) {
-                        echo '--- [Step] Starting App for DAST ---'
-                        // 1. Chạy Container (Detached mode)
-                        sh "docker run -d --name test-app-dast -p ${APP_PORT}:${APP_PORT} ${DOCKER_IMAGE}"
-                        
-                        // 2. Đợi App khởi động
-                        sh "sleep 10"
+	stage('4. DAST (Dynamic Analysis)') {
+    steps {
+        script {
+            if (fileExists('Dockerfile')) {
+                echo '--- [Step] Starting App for DAST ---'
+                // Khởi chạy app
+                sh "docker run -d --name test-app-dast -p ${APP_PORT}:${APP_PORT} ${DOCKER_IMAGE}"
+                
+                // Chờ app khởi động (Tăng lên 15-20s nếu cần)
+                sh "sleep 15"
 
-                        echo '--- [Step] Running OWASP ZAP (DAST) ---'
-                        // 3. Chạy ZAP Baseline Scan (Sử dụng Docker network host để nhìn thấy localhost)
-                        // Lưu ý: Cần đảm bảo Docker Agent có thể pull image OWASP ZAP
-                        try {
-                            sh """
-                                docker run --rm --network host \
-                                -v \$(pwd):/zap/wrk/:rw \
-                                ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-                                -t http://localhost:${APP_PORT} \
-                                -r zap-report.html \
-                                || true 
-                            """
-                            // "|| true" để pipeline không bị fail ngay lập tức nếu ZAP tìm thấy lỗi (cho phép review report sau)
-                        } catch (Exception e) {
-                            echo "DAST scanning encountered errors."
-                        } finally {
-                            // 4. Dọn dẹp container sau khi test
-                            sh "docker stop test-app-dast && docker rm test-app-dast"
-                        }
-                    } else {
-                        echo "Skipping DAST because no Dockerfile was found."
-                    }
+                echo '--- [Step] Running OWASP ZAP (DAST) ---'
+                try {
+                    // SỬA LỖI QUYỀN: Cấp quyền ghi cho mọi user vào thư mục hiện tại để ZAP xuất report
+                    sh "chmod 777 ."
+
+                    sh """
+                        docker run --rm --network host \
+                        -v \$(pwd):/zap/wrk/:rw \
+                        ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+                        -t http://192.168.12.190:${APP_PORT} \
+                        -r zap-report.html
+                    """
+                } catch (Exception e) {
+                    echo "DAST scanning encountered errors: ${e.message}"
+                } finally {
+                    // Trả lại quyền (tùy chọn) và dọn dẹp
+                    sh "docker stop test-app-dast && docker rm test-app-dast"
                 }
             }
         }
-
+    }
+}
         stage('5. Generate Code SBOM') {
             steps {
                 echo '--- [Step] Generate Code SBOM (CycloneDX) ---'
