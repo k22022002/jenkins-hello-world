@@ -67,14 +67,24 @@ pipeline {
                         }
                     }
                 }
-                
-                stage('SCA (Dependency Check)') {
-                    steps {
-                        echo '--- [Step] Scanning Dependencies ---'
-                        dependencyCheck additionalArguments: '--format HTML --format XML --failOnCVSS 7.0', 
-                                        odcInstallation: 'OWASP-Dependency-Check'
-                    }
-                }
+		stage('SCA (Dependency Check)') {
+    steps {
+        echo '--- [Step] Scanning Dependencies with OSS Index ---'
+        // Gọi thông tin xác thực từ Jenkins
+        withCredentials([usernamePassword(credentialsId: 'oss-index-credentials', 
+                                          passwordVariable: 'OSS_TOKEN', 
+                                          usernameVariable: 'OSS_USER')]) {
+            
+            dependencyCheck additionalArguments: """
+                --format HTML --format XML 
+                --failOnCVSS 7.0 
+                --ossIndexUsername ${OSS_USER} 
+                --ossIndexPassword ${OSS_TOKEN}
+            """, 
+            odcInstallation: 'OWASP-Dependency-Check'
+        }
+    }
+}                
 
                 stage('SAST (SonarQube)') {
                     steps {
