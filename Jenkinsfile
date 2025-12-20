@@ -51,9 +51,7 @@ pipeline {
                             echo "--- 1. Downloading Seeker Agent ---"
                             // [SỬA LỖI Ở ĐÂY]
                             // Thêm dấu nháy đơn ' ' bao quanh URL để bảo vệ dấu &
-                            sh """
-                                curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}'
-                            """
+                            sh -c "$( curl -k -X GET -fsSL --header 'Accept: application/x-sh' 'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=')"
 
                             echo "--- 2. Installing Agent ---"
                             sh 'npm config set strict-ssl false'
