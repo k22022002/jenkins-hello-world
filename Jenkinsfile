@@ -42,51 +42,57 @@ pipeline {
                 echo '--- [Step] Synopsys Seeker IAST Setup ---'
                 
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
-                    script {
-                        // 1. Cài đặt Seeker Agent
-                        echo "--- Installing Seeker Agent ---"
-                        sh """
-                            sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
-                            'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
-                        """
+		script {
+    // 1. Cài đặt Seeker Agent
+    echo "--- Installing Seeker Agent ---"
+    sh """
+        sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
+        'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
+    """
 
-                        // 2. Cấu hình biến môi trường
-                        env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
-                        env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
-                        
-                        // --- SỬA LỖI TẠI ĐÂY ---
-                        // A. Dùng đường dẫn tuyệt đối (${env.WORKSPACE}) thay vì tương đối (.)
-                        def agentPath = "${env.WORKSPACE}/seeker/node_modules/@seeker/agent/index.mjs"
-                        
-                        // B. KHÔNG set env.NODE_OPTIONS toàn cục. 
-                        // env.NODE_OPTIONS = ...  <-- Xóa dòng cũ này đi để tránh ảnh hưởng npm test
+    // Định nghĩa đường dẫn Agent
+    def agentPath = "${env.WORKSPACE}/seeker/node_modules/@seeker/agent/index.mjs"
+    
+    // --- [DEBUG 1] Kiểm tra file agent có thực sự tồn tại không ---
+    echo "--- [DEBUG] Checking Agent Path: ${agentPath} ---"
+    sh "ls -l ${agentPath} || echo 'FILE NOT FOUND!'"
 
-                        echo "--- Starting App with Seeker Agent Instrument ---"
-                        
-                        // 3. Khởi chạy ứng dụng (Chỉ gắn NODE_OPTIONS cho lệnh này)
-                        // Chúng ta truyền biến môi trường trực tiếp vào dòng lệnh sh
-                        sh "NODE_OPTIONS='--import \"${agentPath}\"' nohup npm start > app_iast.log 2>&1 &"
-                        
-                        // Đợi ứng dụng khởi động
-                        sh "sleep 10" 
-                        echo "App started via Node.js native process."
+    env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
+    env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
 
-                        // 4. Generate Traffic
-                        echo "--- Running Integration Tests to trigger IAST ---"
-                        try {
-                            sh "curl -v http://localhost:${APP_PORT} || true"
-                            
-                            // Bây giờ 'npm test' sẽ chạy sạch (clean), không bị dính Seeker Agent
-                            // nên sẽ không bị lỗi ERR_MODULE_NOT_FOUND
-                            sh "npm test" 
-                        } catch (Exception e) {
-                            echo "Warning: Error during traffic generation, but proceeding..."
-                        } finally {
-                            // 5. Dọn dẹp
-                            sh "pkill -f node || true"
-                            echo "Stopped Application."
-                        }
-                    }
+    echo "--- Starting App with Seeker Agent ---"
+    
+    // Xóa log cũ nếu có
+    sh "rm -f app_iast.log"
+
+    // Chạy ứng dụng và ghi log
+    // Lưu ý: NODE_OPTIONS cần đường dẫn tuyệt đối chính xác
+    sh "NODE_OPTIONS='--import \"${agentPath}\"' nohup npm start > app_iast.log 2>&1 &"
+    
+    echo "--- Waiting for App to startup (10s) ---"
+    sh "sleep 10"
+
+    // --- [DEBUG 2] QUAN TRỌNG: In log lỗi ra màn hình ---
+    echo "================ APP LOGS (START) ================"
+    sh "cat app_iast.log"
+    echo "================ APP LOGS (END) ================"
+
+    // Kiểm tra xem process node có đang chạy không
+    def isRunning = sh(script: "pgrep -f 'node' > /dev/null && echo 'YES' || echo 'NO'", returnStdout: true).trim()
+    
+    if (isRunning == 'YES') {
+        echo ">>> App is running! Sending Traffic..."
+        try {
+            sh "curl -v http://localhost:${APP_PORT} || true"
+            sh "npm test"
+        } finally {
+            sh "sleep 5"
+            sh "pkill -f node || true"
+        }
+    } else {
+        error ">>> LỖI: Ứng dụng đã bị crash ngay khi khởi động. Hãy xem log ở trên (giữa 2 dòng APP LOGS) để biết nguyên nhân."
+    }
+}
                 }
             }
         }
