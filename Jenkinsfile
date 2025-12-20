@@ -40,45 +40,28 @@ pipeline {
 	// --- BƯỚC 2: CHẠY IAST (SEEKER) ---
         stage('2. IAST (Seeker)') {
             steps {
-                echo '--- [Test] Running IAST (Manual Mode Fixed) ---'
+                echo '--- [Test] Running IAST (Direct NPM Install) ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
                     script {
                         def seekerUrl = "http://192.168.12.190:8082"
                         def projectKey = "jenkins-hello-world"
                         
                         try {
-                            echo "--- 1. Download Installation Package ---"
-                            // [ĐÃ SỬA LẦN 2]: Xóa hẳn tham số flavor khỏi URL
-                            sh '''
-                                echo "Đang tải với Project Key: jenkins-hello-world"
-                                
-                                # LƯU Ý QUAN TRỌNG: 
-                                # Đã xóa "?flavor=NPM" hoặc "?flavor=TGZ". 
-                                # Để URL đơn giản nhất để Server tự quyết định file trả về.
-                                
-                                curl -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
-                                
-                                # Kiểm tra file tải về
-                                echo "--- KIỂM TRA FILE TẢI VỀ ---"
-                                file seeker-agent.tgz
-                                
-                                # Nếu file nhỏ hơn 1000 bytes, có thể là lỗi JSON
-                                FILE_SIZE=$(du -b seeker-agent.tgz | cut -f1)
-                                if [ "$FILE_SIZE" -lt 1000 ]; then
-                                    echo "!!! LỖI TỪ SERVER SEEKER !!!"
-                                    echo "Nội dung phản hồi:"
-                                    cat seeker-agent.tgz
-                                    echo "--------------------------"
-                                    exit 1
-                                else
-                                    echo ">>> Tải thành công! (Size: $FILE_SIZE bytes)"
-                                fi
-                            '''
-                            
-                            echo "--- 2. Install Agent using NPM ---"
+                            echo "--- 1. Clean previous attempts ---"
+                            sh 'rm -rf node_modules/seeker-agent node_modules/@seeker/agent seeker-agent.tgz'
+
+                            echo "--- 2. Install Agent directly from URL ---"
+                            // Cấu hình NPM bỏ qua lỗi SSL
                             sh 'npm config set strict-ssl false'
-                            // Lệnh này sẽ bung file tgz ra và cài vào node_modules
-                            sh 'npm install --no-save ./seeker-agent.tgz'
+                            
+                            // CHIẾN THUẬT MỚI: Dùng npm install trực tiếp URL
+                            // Lưu ý: URL phải để trong dấu ngoặc kép "..." để nhận biến $SEEKER_TOKEN
+                            // Chúng ta thử bỏ tham số flavor vì server có vẻ không thích nó
+                            sh """
+                                echo "Installing from: ${seekerUrl}..."
+                                
+                                npm install --no-save "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?projectKey=jenkins-hello-world&accessToken=${env.SEEKER_TOKEN}"
+                            """
                             
                             echo "--- 3. Start App with Seeker ---"
                             sh """
@@ -87,19 +70,23 @@ pipeline {
                                 export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                # Logic tìm file index.mjs hoặc index.js của agent
+                                # Tìm đường dẫn file agent (Thường nằm trong @seeker/agent hoặc seeker-agent)
                                 AGENT_PATH=""
                                 if [ -f "node_modules/@seeker/agent/index.mjs" ]; then
                                     AGENT_PATH="node_modules/@seeker/agent/index.mjs"
+                                    echo "Found agent at: @seeker/agent"
                                 elif [ -f "node_modules/seeker-agent/index.js" ]; then
                                     AGENT_PATH="node_modules/seeker-agent/index.js"
+                                    echo "Found agent at: seeker-agent"
                                 else
                                     # Fallback tìm kiếm
                                     AGENT_PATH=\$(find node_modules -name "index.mjs" | grep seeker | head -n 1)
                                 fi
 
                                 if [ -z "\$AGENT_PATH" ]; then
-                                    echo "ERROR: Không tìm thấy Seeker Agent trong node_modules"
+                                    echo "ERROR: Không tìm thấy Seeker Agent trong node_modules sau khi cài đặt!"
+                                    # List thư mục để debug
+                                    ls -R node_modules | grep seeker || true
                                     exit 1
                                 fi
                                 
@@ -129,13 +116,14 @@ pipeline {
 
                         } catch (Exception e) {
                             echo "IAST Error: ${e.toString()}"
+                            // Quan trọng: In log lỗi nếu npm install thất bại
+                            sh 'cat npm-debug.log || true' 
                             sh 'cat app_iast.log || true'
                             currentBuild.result = 'FAILURE'
                         } finally {
                             if (fileExists('iast_app.pid')) {
                                 sh "kill \$(cat iast_app.pid) || true"
                             }
-                            sh 'rm -f seeker-agent.tgz'
                         }
                     }
                 }
