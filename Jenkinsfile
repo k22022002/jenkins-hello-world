@@ -48,9 +48,11 @@ pipeline {
                         def projectKey = "jenkins_hello_world"
                         
                         try {
-                            // Cài đè lại Agent để đảm bảo luôn mới nhất (nhanh, không tốn thời gian)
-                            sh 'npm install --no-save @synopsys/seeker-agent'
-
+			    // 1. Tắt chế độ kiểm tra chứng chỉ bảo mật
+                            sh 'npm config set strict-ssl false'
+                            // 2. Chuyển sang dùng HTTP thường thay vì HTTPS (nếu cần thiết)
+                            sh 'npm config set registry "http://registry.npmjs.org/"'
+                            // --------------------------------------//
                             echo "--- Starting App with Seeker Agent ---"
                             sh """
                                 export SEEKER_SERVER_URL="${seekerUrl}"
