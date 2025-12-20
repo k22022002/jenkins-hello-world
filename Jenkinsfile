@@ -39,51 +39,45 @@ pipeline {
         }
 
         // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
-        stage('2. IAST (Seeker)') {
+	stage('2. IAST (Seeker)') {
             steps {
-                echo '--- [Test] Running IAST Only (Fixed Binary Download) ---'
+                echo '--- [Test] Running IAST (Manual Mode Fixed) ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
                     script {
                         def seekerUrl = "http://192.168.12.190:8082"
                         def projectKey = "jenkins-hello-world"
                         
                         try {
-                            echo "--- 1. Downloading Seeker Agent ---"
-                            // CHANGED: Direct binary download to 'seeker-agent.tgz'
-			    sh "curl -f -k -o seeker-agent.tgz 'http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=jenkins-hello-world'"
-                            echo "--- 2. Installing Agent ---"
-                            // This will now work because seeker-agent.tgz actually exists
+                            echo "--- 1. Download Installation Package ---"
+                            // [ĐÃ SỬA]: Thêm Access Token vào URL
+                            sh "curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}&accessToken=${env.SEEKER_TOKEN}'"
+
+                            echo "--- 2. Install Agent using NPM ---"
                             sh 'npm config set strict-ssl false'
                             sh 'npm install --no-save ./seeker-agent.tgz'
                             
-                            echo "--- 3. Verifying Installation Path ---"
-                            sh 'find node_modules -name "index.mjs" | grep seeker'
-
-                            echo "--- 4. Starting App with Seeker Agent ---"
-                            // ... (rest of your startup logic remains the same) ...
+                            echo "--- 3. Start App with Seeker ---"
                             sh """
                                 export SEEKER_SERVER_URL="${seekerUrl}"
-                                export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_PROJECT_KEY="${projectKey}"
+                                export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                AGENT_PATH=\$(find node_modules -name "index.mjs" | grep seeker | head -n 1)
-                                
-                                if [ -z "\$AGENT_PATH" ]; then
-                                    echo "ERROR: Agent not found!"
-                                    exit 1
+                                # Tìm đường dẫn file agent
+                                AGENT_PATH="node_modules/@seeker/agent/index.mjs"
+                                if [ ! -f "\$AGENT_PATH" ]; then
+                                    AGENT_PATH=\$(find node_modules -name "index.mjs" | grep seeker | head -n 1)
                                 fi
                                 
-                                echo ">>> Found Agent at: \$AGENT_PATH"
+                                echo ">>> Starting Node with Agent at: \$AGENT_PATH"
                                 nohup node --import ./\$AGENT_PATH app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
 
-                            // ... (Healthcheck and Traffic steps remain the same) ...
-                             sh """
+                            // Healthcheck & Traffic (Giữ nguyên)
+                            sh """
                                 timeout=60
                                 while ! curl -s http://localhost:${APP_PORT} > /dev/null; do
-                                    echo "Waiting for App..."
                                     sleep 2
                                     timeout=\$((timeout-2))
                                     if [ \$timeout -le 0 ]; then 
@@ -96,9 +90,8 @@ pipeline {
                             """
                             
                             echo "--- Generating Traffic ---"
-                            sh 'npm test || true' 
+                            sh 'npm test || true'
                             sh "curl -s http://localhost:${APP_PORT}/"
-                            echo "IAST Scan Success."
 
                         } catch (Exception e) {
                             echo "IAST Error: ${e.toString()}"
