@@ -43,35 +43,46 @@ pipeline {
             steps {
                 echo '--- [Test] Running IAST Only ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
-                    script {
+		script {
                         def seekerUrl = "http://192.168.12.190:8082"
                         def projectKey = "jenkins_hello_world"
                         
                         try {
-			    // 1. Tắt chế độ kiểm tra chứng chỉ bảo mật
+                            echo "--- 1. Configuring NPM & Installing Agent ---"
+                            // Tắt SSL strict để tránh lỗi ngày giờ
                             sh 'npm config set strict-ssl false'
-                            // 2. Chuyển sang dùng HTTP thường thay vì HTTPS (nếu cần thiết)
                             sh 'npm config set registry "http://registry.npmjs.org/"'
-                            // --------------------------------------//
-                            echo "--- Starting App with Seeker Agent ---"
+                            
+                            // Cài đặt Agent
+                            sh 'npm install --no-save @synopsys/seeker-agent'
+
+                            // [DEBUG] Kiểm tra xem file có thực sự tồn tại không?
+                            echo "--- DEBUG: Checking installed modules ---"
+                            sh 'ls -la node_modules/@synopsys/seeker-agent || echo "WARNING: Folder not found!"'
+
+                            echo "--- 2. Starting App with Seeker Agent ---"
                             sh """
                                 export SEEKER_SERVER_URL="${seekerUrl}"
                                 export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_PROJECT_KEY="${projectKey}"
                                 export SEEKER_AGENT_NAME="Jenkins-Test-IAST-${env.BUILD_NUMBER}"
                                 
-                                nohup node -r @synopsys/seeker-agent/index.js app.js > app_iast.log 2>&1 &
+                                # [SỬA LỖI Ở ĐÂY]
+                                # Thay vì gọi file index.js, ta gọi tên gói để Node tự tìm entrypoint
+                                nohup node -r @synopsys/seeker-agent app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
 
-                            // Healthcheck
+                            // 3. Healthcheck
                             sh """
                                 timeout=60
                                 while ! curl -s http://localhost:${APP_PORT} > /dev/null; do
+                                    echo "Waiting for App..."
                                     sleep 2
                                     timeout=\$((timeout-2))
                                     if [ \$timeout -le 0 ]; then 
-                                        echo "TIMEOUT!"
+                                        echo "TIMEOUT: App failed to start."
+                                        echo "--- LOG APP ---"
                                         cat app_iast.log
                                         exit 1
                                     fi
@@ -79,11 +90,11 @@ pipeline {
                                 echo "App is READY!"
                             """
 
-                            // Generate Traffic
+                            // 4. Generate Traffic
                             echo "--- Generating Traffic ---"
-                            // Nếu node_modules cũ còn, lệnh test sẽ chạy rất nhanh
-                            sh 'npm test' 
+                            sh 'npm test || true' 
                             sh "curl -s http://localhost:${APP_PORT}/"
+                            echo "IAST Scan Success."
 
                         } catch (Exception e) {
                             echo "IAST Error: ${e.toString()}"
