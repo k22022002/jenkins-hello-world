@@ -51,18 +51,28 @@ pipeline {
                             echo "--- 1. Download Installation Package ---"
                             // [ĐÃ SỬA]: Thêm Access Token vào URL
 			    sh '''
-                                curl -f -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
-                            '''
-
-                            // Kiểm tra xem file tải về là file thật hay file lỗi
-                            sh '''
+                                echo "Đang tải với Project Key: jenkins-hello-world"
+                                
+                                # LƯU Ý: 
+                                # 1. URL được bao bởi dấu nháy kép "..." để Shell hiểu được dấu & và biến $SEEKER_TOKEN
+                                # 2. Bỏ cờ -f để curl tải file lỗi về (giúp ta đọc nội dung lỗi)
+                                
+                                curl -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
+                                
+                                # Kiểm tra file tải về
+                                echo "--- KIỂM TRA FILE TẢI VỀ ---"
+                                file seeker-agent.tgz
+                                
+                                # Nếu file nhỏ hơn 1000 bytes, chắc chắn là file lỗi JSON từ server
                                 FILE_SIZE=$(du -b seeker-agent.tgz | cut -f1)
                                 if [ "$FILE_SIZE" -lt 1000 ]; then
-                                    echo "ERROR: Tải file thất bại! Nội dung lỗi từ Server là:"
+                                    echo "!!! LỖI TỪ SERVER SEEKER !!!"
+                                    echo "Nội dung phản hồi:"
                                     cat seeker-agent.tgz
+                                    echo "--------------------------"
                                     exit 1
                                 else
-                                    echo "SUCCESS: Đã tải file (Size: $FILE_SIZE bytes)"
+                                    echo ">>> Tải thành công! (Size: $FILE_SIZE bytes)"
                                 fi
                             '''
                             echo "--- 2. Install Agent using NPM ---"
