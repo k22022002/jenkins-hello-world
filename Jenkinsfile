@@ -51,8 +51,7 @@ pipeline {
                         try {
                             echo "--- 1. Downloading Seeker Agent ---"
                             // CHANGED: Direct binary download to 'seeker-agent.tgz'
-                            sh "curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}'"
-
+			    sh "curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}'"
                             echo "--- 2. Installing Agent ---"
                             // This will now work because seeker-agent.tgz actually exists
                             sh 'npm config set strict-ssl false'
