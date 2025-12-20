@@ -45,7 +45,7 @@ pipeline {
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
                     script {
                         def seekerUrl = "http://192.168.12.190:8082"
-                        def projectKey = "jenkins_hello_world"
+                        def projectKey = "jenkins-hello-world"
                         
                         try {
                             echo "--- 1. Downloading Seeker Agent ---"
