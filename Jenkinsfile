@@ -43,59 +43,65 @@ pipeline {
                     echo '--- [Step] Synopsys Seeker IAST Setup ---'
                     withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                         
-                        // 1. Reset thư mục seeker để cài mới từ đầu
+                        // 1. Reset thư mục
                         sh "rm -rf seeker app_iast.log || true"
 
-                        // 2. Tải Seeker Agent
+                        // 2. Tải file về (Giữ nguyên)
                         echo "--- Downloading Seeker Agent ---"
                         sh """
                             sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
                             'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
                         """
 
-                        // 3. Cài đặt dependencies (Bắt buộc)
-                        echo "--- Installing Agent Dependencies ---"
+                        // 3. [FIX] Giải nén và Cài đặt thủ công
+                        echo "--- Manually Extracting & Installing ---"
                         dir('seeker') {
-                            // Cố gắng cài đặt, bỏ qua lỗi bảo mật
-                            sh "npm install --no-audit --no-fund"
+                            // File nén thường có tên seeker-agent.tgz
+                            // Khi giải nén npm pack, nó thường bung ra thư mục tên là 'package'
+                            sh "tar -xzf seeker-agent.tgz"
+                            
+                            // Đổi tên thư mục 'package' thành 'agent-core' cho dễ quản lý
+                            sh "mv package agent-core"
+                            
+                            // Vào thư mục vừa giải nén để cài dependencies
+                            dir('agent-core') {
+                                echo "Installing dependencies inside agent..."
+                                sh "npm install --production --no-audit --no-fund"
+                            }
                         }
 
-                        // 4. [QUAN TRỌNG] Tự động tìm đường dẫn file Agent
-                        // Chúng ta tìm file có tên 'index.mjs' hoặc 'index.js' trong thư mục seeker
-                        echo "--- Locating Agent File ---"
+                        // 4. Tìm đường dẫn file chạy (index.mjs hoặc index.js)
+                        // Bây giờ file chắc chắn nằm trong seeker/agent-core/
+                        def agentDir = "${env.WORKSPACE}/seeker/agent-core"
+                        def agentFile = ""
                         
-                        // In ra cấu trúc thư mục để debug (nếu lỗi tiếp sẽ biết file nằm đâu)
-                        sh "ls -R seeker" 
-
-                        // Dùng lệnh find để lấy đường dẫn thực tế
-                        def foundPath = sh(script: "find ${env.WORKSPACE}/seeker -type f -name 'index.mjs' | head -n 1", returnStdout: true).trim()
-                        
-                        // Nếu không thấy .mjs, tìm thử .js
-                        if (foundPath == "") {
-                             echo "Warning: index.mjs not found. Searching for index.js..."
-                             foundPath = sh(script: "find ${env.WORKSPACE}/seeker -type f -name 'index.js' | grep '@seeker/agent' | head -n 1", returnStdout: true).trim()
+                        // Kiểm tra file tồn tại
+                        if (fileExists("${agentDir}/index.mjs")) {
+                            agentFile = "${agentDir}/index.mjs"
+                        } else if (fileExists("${agentDir}/index.js")) {
+                            agentFile = "${agentDir}/index.js"
+                        } else {
+                            // Debug nếu vẫn không thấy
+                            sh "ls -R seeker"
+                            error "Vẫn không tìm thấy file index.mjs/index.js sau khi giải nén!"
                         }
 
-                        if (foundPath == "") {
-                            error "LỖI: Không tìm thấy file agent (index.mjs hoặc index.js) trong thư mục seeker! Hãy xem log lệnh 'ls -R' ở trên."
-                        }
-
-                        echo ">>> Found Agent at: ${foundPath}"
+                        echo ">>> FOUND AGENT AT: ${agentFile}"
 
                         // 5. Cấu hình môi trường
                         env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
                         env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
                         
-                        // 6. Chạy App với đường dẫn vừa tìm được
+                        // 6. Chạy App
                         echo "--- Starting App ---"
-                        sh "pkill -f node || true"
+                        sh "pkill -f node || true" // Kill process cũ
                         
-                        // Sử dụng biến foundPath thay vì đường dẫn cứng
-                        sh "NODE_OPTIONS='--import \"${foundPath}\"' nohup npm start > app_iast.log 2>&1 &"
+                        // Dùng biến agentFile vừa tìm được
+                        sh "NODE_OPTIONS='--import \"${agentFile}\"' nohup npm start > app_iast.log 2>&1 &"
                         
-                        sh "sleep 15"
+                        sh "sleep 15" // Đợi app khởi động và kết nối Seeker
 
-                        // 7. Kiểm tra kết quả
+                        // 7. Kiểm tra log
                         echo "================ APP LOGS ================"
                         sh "cat app_iast.log"
                         echo "=========================================="
@@ -105,6 +111,7 @@ pipeline {
                         if (isRunning == 'YES') {
                             echo ">>> SUCCESS: App is running with Seeker!"
                             try {
+                                echo "--- Sending Traffic ---"
                                 sh "curl -v http://localhost:${APP_PORT} || true"
                                 sh "npm test" 
                             } finally {
@@ -112,7 +119,7 @@ pipeline {
                                 sh "pkill -f node || true"
                             }
                         } else {
-                            error ">>> App crashed. Vui lòng kiểm tra log ở trên."
+                            error ">>> App crashed. Kiểm tra log ở trên."
                         }
                     }
                 }
