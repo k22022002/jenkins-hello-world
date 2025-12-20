@@ -41,52 +41,48 @@ pipeline {
             steps {
                 echo '--- [Step] Synopsys Seeker IAST Setup ---'
                 
-                // Sử dụng Credentials ID 'seeker-access-token' như trong hình bạn cung cấp
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                     script {
-                        // 1. Cài đặt Seeker Agent tự động
-                        // Lệnh này tải và cài đặt agent vào thư mục hiện tại (thường là ./seeker)
+                        // 1. Cài đặt Seeker Agent
                         echo "--- Installing Seeker Agent ---"
                         sh """
                             sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
                             'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
                         """
 
-                        // 2. Cấu hình biến môi trường (Dựa trên hướng dẫn trong ảnh)
+                        // 2. Cấu hình biến môi trường
                         env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
                         env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
                         
-                        // Định cấu hình Node để load Agent khi khởi chạy
-                        // Đường dẫn này trỏ đến nơi script cài đặt agent (mặc định là ./seeker)
-                        env.NODE_OPTIONS = '--import "./seeker/node_modules/@seeker/agent/index.mjs"'
-                    }
+                        // --- SỬA LỖI TẠI ĐÂY ---
+                        // A. Dùng đường dẫn tuyệt đối (${env.WORKSPACE}) thay vì tương đối (.)
+                        def agentPath = "${env.WORKSPACE}/seeker/node_modules/@seeker/agent/index.mjs"
+                        
+                        // B. KHÔNG set env.NODE_OPTIONS toàn cục. 
+                        // env.NODE_OPTIONS = ...  <-- Xóa dòng cũ này đi để tránh ảnh hưởng npm test
 
-                    script {
                         echo "--- Starting App with Seeker Agent Instrument ---"
                         
-                        // 3. Khởi chạy ứng dụng (Background Mode)
-                        // 'npm start' sẽ tự động nhận NODE_OPTIONS và gắn Seeker Agent vào
-                        sh "nohup npm start > app_iast.log 2>&1 &"
+                        // 3. Khởi chạy ứng dụng (Chỉ gắn NODE_OPTIONS cho lệnh này)
+                        // Chúng ta truyền biến môi trường trực tiếp vào dòng lệnh sh
+                        sh "NODE_OPTIONS='--import \"${agentPath}\"' nohup npm start > app_iast.log 2>&1 &"
                         
-                        // Đợi ứng dụng khởi động (Healthcheck đơn giản)
+                        // Đợi ứng dụng khởi động
                         sh "sleep 10" 
                         echo "App started via Node.js native process."
 
-                        // 4. Generate Traffic (QUAN TRỌNG VỚI IAST)
-                        // IAST chỉ tìm thấy lỗi khi có request chạy vào ứng dụng.
-                        // Tại đây ta tái sử dụng 'npm test' hoặc chạy các lệnh curl để kích hoạt luồng code.
+                        // 4. Generate Traffic
                         echo "--- Running Integration Tests to trigger IAST ---"
                         try {
-                            // Gọi request vào localhost để Agent bắt dữ liệu
                             sh "curl -v http://localhost:${APP_PORT} || true"
                             
-                            // Nếu bạn có bộ test API/Integration, hãy chạy ở đây:
-                            // sh "npm run test:integration"
+                            // Bây giờ 'npm test' sẽ chạy sạch (clean), không bị dính Seeker Agent
+                            // nên sẽ không bị lỗi ERR_MODULE_NOT_FOUND
                             sh "npm test" 
                         } catch (Exception e) {
                             echo "Warning: Error during traffic generation, but proceeding..."
                         } finally {
-                            // 5. Dọn dẹp: Tắt ứng dụng sau khi quét xong
+                            // 5. Dọn dẹp
                             sh "pkill -f node || true"
                             echo "Stopped Application."
                         }
