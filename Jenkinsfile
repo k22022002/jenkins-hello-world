@@ -37,8 +37,6 @@ pipeline {
                 }
             }
         }
-
-        // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
 	// --- BƯỚC 2: CHẠY IAST (SEEKER) ---
         stage('2. IAST (Seeker)') {
             steps {
@@ -50,12 +48,15 @@ pipeline {
                         
                         try {
                             echo "--- 1. Download Installation Package ---"
-                            // [ĐÃ SỬA]: Đổi flavor=TGZ thành flavor=NPM
+                            // [ĐÃ SỬA LẦN 2]: Xóa hẳn tham số flavor khỏi URL
                             sh '''
                                 echo "Đang tải với Project Key: jenkins-hello-world"
                                 
-                                # LƯU Ý: Đổi flavor=TGZ -> flavor=NPM cho NodeJS
-                                curl -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=NPM&projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
+                                # LƯU Ý QUAN TRỌNG: 
+                                # Đã xóa "?flavor=NPM" hoặc "?flavor=TGZ". 
+                                # Để URL đơn giản nhất để Server tự quyết định file trả về.
+                                
+                                curl -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
                                 
                                 # Kiểm tra file tải về
                                 echo "--- KIỂM TRA FILE TẢI VỀ ---"
@@ -68,10 +69,6 @@ pipeline {
                                     echo "Nội dung phản hồi:"
                                     cat seeker-agent.tgz
                                     echo "--------------------------"
-                                    # Kiểm tra xem nội dung có phải là script npm không (đôi khi seeker trả về script install)
-                                    if grep -q "npm install" seeker-agent.tgz; then
-                                       echo "Cảnh báo: Server trả về hướng dẫn text thay vì binary. Kiểm tra lại URL."
-                                    fi
                                     exit 1
                                 else
                                     echo ">>> Tải thành công! (Size: $FILE_SIZE bytes)"
@@ -90,7 +87,6 @@ pipeline {
                                 export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                # Tìm đường dẫn file agent (Thường nằm trong @seeker/agent hoặc seeker-agent)
                                 # Logic tìm file index.mjs hoặc index.js của agent
                                 AGENT_PATH=""
                                 if [ -f "node_modules/@seeker/agent/index.mjs" ]; then
@@ -108,7 +104,6 @@ pipeline {
                                 fi
                                 
                                 echo ">>> Starting Node with Agent at: \$AGENT_PATH"
-                                # Node 18+ dùng --import, bản cũ hơn có thể cần -r (require)
                                 nohup node --import ./\$AGENT_PATH app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
