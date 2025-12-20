@@ -46,44 +46,45 @@ pipeline {
                         // 1. Reset thư mục
                         sh "rm -rf seeker app_iast.log || true"
 
-                        // 2. Tải file về (Giữ nguyên)
+                        // 2. Tải Seeker Agent
                         echo "--- Downloading Seeker Agent ---"
                         sh """
                             sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
                             'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
                         """
 
-                        // 3. [FIX] Giải nén và Cài đặt thủ công
-                        echo "--- Manually Extracting & Installing ---"
+                        // 3. [FIX] Giải nén (Và KHÔNG chạy npm install)
+                        echo "--- Extracting Agent ---"
                         dir('seeker') {
-                            // File nén thường có tên seeker-agent.tgz
-                            // Khi giải nén npm pack, nó thường bung ra thư mục tên là 'package'
+                            // Giải nén file tgz
                             sh "tar -xzf seeker-agent.tgz"
                             
-                            // Đổi tên thư mục 'package' thành 'agent-core' cho dễ quản lý
+                            // Mặc định nó bung ra thư mục tên là 'package', đổi tên lại cho đẹp
                             sh "mv package agent-core"
                             
-                            // Vào thư mục vừa giải nén để cài dependencies
-                            dir('agent-core') {
-                                echo "Installing dependencies inside agent..."
-                                sh "npm install --production --no-audit --no-fund"
-                            }
+                            // [QUAN TRỌNG] Kiểm tra xem trong này đã có thư mục node_modules sẵn chưa?
+                            // Hầu hết các bản Enterprise Agent đều đóng gói sẵn.
+                            sh "ls -F agent-core/"
                         }
 
-                        // 4. Tìm đường dẫn file chạy (index.mjs hoặc index.js)
-                        // Bây giờ file chắc chắn nằm trong seeker/agent-core/
+                        // 4. Xác định đường dẫn file chạy
                         def agentDir = "${env.WORKSPACE}/seeker/agent-core"
                         def agentFile = ""
                         
-                        // Kiểm tra file tồn tại
+                        // Ưu tiên tìm index.mjs, sau đó đến index.js, sau đó đến src/index.js
                         if (fileExists("${agentDir}/index.mjs")) {
                             agentFile = "${agentDir}/index.mjs"
                         } else if (fileExists("${agentDir}/index.js")) {
                             agentFile = "${agentDir}/index.js"
                         } else {
-                            // Debug nếu vẫn không thấy
+                            // Trường hợp xấu nhất: File nằm sâu hơn hoặc tên khác
+                            echo "--- Warning: Standard index file not found. Searching... ---"
+                            agentFile = sh(script: "find ${agentDir} -name index.mjs -o -name index.js | head -n 1", returnStdout: true).trim()
+                        }
+
+                        if (agentFile == "") {
                             sh "ls -R seeker"
-                            error "Vẫn không tìm thấy file index.mjs/index.js sau khi giải nén!"
+                            error "LỖI: Không tìm thấy file chạy của Agent sau khi giải nén."
                         }
 
                         echo ">>> FOUND AGENT AT: ${agentFile}"
@@ -94,14 +95,14 @@ pipeline {
                         
                         // 6. Chạy App
                         echo "--- Starting App ---"
-                        sh "pkill -f node || true" // Kill process cũ
+                        sh "pkill -f node || true"
                         
-                        // Dùng biến agentFile vừa tìm được
+                        // Chạy App với đường dẫn tuyệt đối tới file agent vừa giải nén
                         sh "NODE_OPTIONS='--import \"${agentFile}\"' nohup npm start > app_iast.log 2>&1 &"
                         
-                        sh "sleep 15" // Đợi app khởi động và kết nối Seeker
+                        sh "sleep 15" // Đợi App khởi động
 
-                        // 7. Kiểm tra log
+                        // 7. Kiểm tra kết quả
                         echo "================ APP LOGS ================"
                         sh "cat app_iast.log"
                         echo "=========================================="
@@ -119,7 +120,7 @@ pipeline {
                                 sh "pkill -f node || true"
                             }
                         } else {
-                            error ">>> App crashed. Kiểm tra log ở trên."
+                            error ">>> App crashed. Kiểm tra log ở trên. Nếu lỗi là 'Cannot find module', có thể file nén bị lỗi."
                         }
                     }
                 }
