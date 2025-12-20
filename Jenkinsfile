@@ -50,8 +50,21 @@ pipeline {
                         try {
                             echo "--- 1. Download Installation Package ---"
                             // [ĐÃ SỬA]: Thêm Access Token vào URL
-                            sh "curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}&accessToken=${env.SEEKER_TOKEN}'"
+			    sh '''
+                                curl -f -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
+                            '''
 
+                            // Kiểm tra xem file tải về là file thật hay file lỗi
+                            sh '''
+                                FILE_SIZE=$(du -b seeker-agent.tgz | cut -f1)
+                                if [ "$FILE_SIZE" -lt 1000 ]; then
+                                    echo "ERROR: Tải file thất bại! Nội dung lỗi từ Server là:"
+                                    cat seeker-agent.tgz
+                                    exit 1
+                                else
+                                    echo "SUCCESS: Đã tải file (Size: $FILE_SIZE bytes)"
+                                fi
+                            '''
                             echo "--- 2. Install Agent using NPM ---"
                             sh 'npm config set strict-ssl false'
                             sh 'npm install --no-save ./seeker-agent.tgz'
