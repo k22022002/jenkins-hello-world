@@ -43,57 +43,68 @@ pipeline {
                     echo '--- [Step] Synopsys Seeker IAST Setup ---'
                     withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                         
-                        // 1. Tải Seeker Agent (Giữ nguyên)
-                        // Lệnh này sẽ tạo thư mục './seeker'
+                        // 1. Reset thư mục seeker để cài mới từ đầu
+                        sh "rm -rf seeker app_iast.log || true"
+
+                        // 2. Tải Seeker Agent
+                        echo "--- Downloading Seeker Agent ---"
                         sh """
-                            rm -rf seeker || true
                             sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
                             'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
                         """
 
-                        // 2. [QUAN TRỌNG] Cài đặt dependencies cho Seeker Agent
-                        // Đây là bước đang bị thiếu khiến lỗi module not found xảy ra
-                        echo "--- Fixing Seeker Dependencies ---"
+                        // 3. Cài đặt dependencies (Bắt buộc)
+                        echo "--- Installing Agent Dependencies ---"
                         dir('seeker') {
-                            // Chạy npm install bên trong thư mục seeker để tạo node_modules
-                            sh 'npm install --no-audit --no-fund'
+                            // Cố gắng cài đặt, bỏ qua lỗi bảo mật
+                            sh "npm install --no-audit --no-fund"
                         }
 
-                        // 3. Kiểm tra file tồn tại chưa (Debug)
-                        // Lệnh này sẽ tìm file index.mjs và in đường dẫn ra để ta chắc chắn
-                        echo "--- Verifying Agent File ---"
-                        sh "find ${env.WORKSPACE}/seeker -name index.mjs"
-
-                        // 4. Cấu hình đường dẫn tuyệt đối
-                        // Lưu ý: Sau khi npm install, đường dẫn chuẩn thường là như bên dưới
-                        def agentPath = "${env.WORKSPACE}/seeker/node_modules/@seeker/agent/index.mjs"
+                        // 4. [QUAN TRỌNG] Tự động tìm đường dẫn file Agent
+                        // Chúng ta tìm file có tên 'index.mjs' hoặc 'index.js' trong thư mục seeker
+                        echo "--- Locating Agent File ---"
                         
+                        // In ra cấu trúc thư mục để debug (nếu lỗi tiếp sẽ biết file nằm đâu)
+                        sh "ls -R seeker" 
+
+                        // Dùng lệnh find để lấy đường dẫn thực tế
+                        def foundPath = sh(script: "find ${env.WORKSPACE}/seeker -type f -name 'index.mjs' | head -n 1", returnStdout: true).trim()
+                        
+                        // Nếu không thấy .mjs, tìm thử .js
+                        if (foundPath == "") {
+                             echo "Warning: index.mjs not found. Searching for index.js..."
+                             foundPath = sh(script: "find ${env.WORKSPACE}/seeker -type f -name 'index.js' | grep '@seeker/agent' | head -n 1", returnStdout: true).trim()
+                        }
+
+                        if (foundPath == "") {
+                            error "LỖI: Không tìm thấy file agent (index.mjs hoặc index.js) trong thư mục seeker! Hãy xem log lệnh 'ls -R' ở trên."
+                        }
+
+                        echo ">>> Found Agent at: ${foundPath}"
+
+                        // 5. Cấu hình môi trường
                         env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
                         env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
-
-                        echo "--- Starting App with Seeker Agent ---"
                         
-                        // Dọn dẹp process cũ
+                        // 6. Chạy App với đường dẫn vừa tìm được
+                        echo "--- Starting App ---"
                         sh "pkill -f node || true"
-                        sh "rm -f app_iast.log"
-
-                        // 5. Chạy App
-                        sh "NODE_OPTIONS='--import \"${agentPath}\"' nohup npm start > app_iast.log 2>&1 &"
                         
-                        sh "sleep 15" // Đợi app khởi động
+                        // Sử dụng biến foundPath thay vì đường dẫn cứng
+                        sh "NODE_OPTIONS='--import \"${foundPath}\"' nohup npm start > app_iast.log 2>&1 &"
+                        
+                        sh "sleep 15"
 
-                        // 6. Kiểm tra Log và Process
+                        // 7. Kiểm tra kết quả
                         echo "================ APP LOGS ================"
                         sh "cat app_iast.log"
                         echo "=========================================="
                         
-                        // Kiểm tra xem node có đang chạy không
                         def isRunning = sh(script: "pgrep -f 'node' > /dev/null && echo 'YES' || echo 'NO'", returnStdout: true).trim()
 
                         if (isRunning == 'YES') {
-                            echo ">>> App is running successfully with Seeker!"
+                            echo ">>> SUCCESS: App is running with Seeker!"
                             try {
-                                echo "--- Sending Traffic ---"
                                 sh "curl -v http://localhost:${APP_PORT} || true"
                                 sh "npm test" 
                             } finally {
@@ -101,7 +112,7 @@ pipeline {
                                 sh "pkill -f node || true"
                             }
                         } else {
-                            error ">>> App crashed. Kiểm tra log ở trên. Nếu lỗi vẫn là MODULE_NOT_FOUND, hãy xem kết quả lệnh 'find' in ra gì."
+                            error ">>> App crashed. Vui lòng kiểm tra log ở trên."
                         }
                     }
                 }
