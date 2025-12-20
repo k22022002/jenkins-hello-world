@@ -39,7 +39,6 @@ pipeline {
         }
 
         // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
-	// --- BƯỚC 2: CHẠY IAST (SEEKER) ---
         stage('2. IAST (Seeker)') {
             steps {
                 echo '--- [Test] Running IAST Only (Fixed Binary Download) ---'
@@ -51,7 +50,7 @@ pipeline {
                         try {
                             echo "--- 1. Downloading Seeker Agent ---"
                             // CHANGED: Direct binary download to 'seeker-agent.tgz'
-			    sh "curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}'"
+			    sh "curl -f -k -o seeker-agent.tgz 'http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=jenkins-hello-world'"
                             echo "--- 2. Installing Agent ---"
                             // This will now work because seeker-agent.tgz actually exists
                             sh 'npm config set strict-ssl false'
