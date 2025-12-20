@@ -39,7 +39,8 @@ pipeline {
         }
 
         // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
-	stage('2. IAST (Seeker)') {
+	// --- BƯỚC 2: CHẠY IAST (SEEKER) ---
+        stage('2. IAST (Seeker)') {
             steps {
                 echo '--- [Test] Running IAST (Manual Mode Fixed) ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
@@ -49,34 +50,37 @@ pipeline {
                         
                         try {
                             echo "--- 1. Download Installation Package ---"
-                            // [ĐÃ SỬA]: Thêm Access Token vào URL
-			    sh '''
+                            // [ĐÃ SỬA]: Đổi flavor=TGZ thành flavor=NPM
+                            sh '''
                                 echo "Đang tải với Project Key: jenkins-hello-world"
                                 
-                                # LƯU Ý: 
-                                # 1. URL được bao bởi dấu nháy kép "..." để Shell hiểu được dấu & và biến $SEEKER_TOKEN
-                                # 2. Bỏ cờ -f để curl tải file lỗi về (giúp ta đọc nội dung lỗi)
-                                
-                                curl -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
+                                # LƯU Ý: Đổi flavor=TGZ -> flavor=NPM cho NodeJS
+                                curl -k -o seeker-agent.tgz "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=NPM&projectKey=jenkins-hello-world&accessToken=$SEEKER_TOKEN"
                                 
                                 # Kiểm tra file tải về
                                 echo "--- KIỂM TRA FILE TẢI VỀ ---"
                                 file seeker-agent.tgz
                                 
-                                # Nếu file nhỏ hơn 1000 bytes, chắc chắn là file lỗi JSON từ server
+                                # Nếu file nhỏ hơn 1000 bytes, có thể là lỗi JSON
                                 FILE_SIZE=$(du -b seeker-agent.tgz | cut -f1)
                                 if [ "$FILE_SIZE" -lt 1000 ]; then
                                     echo "!!! LỖI TỪ SERVER SEEKER !!!"
                                     echo "Nội dung phản hồi:"
                                     cat seeker-agent.tgz
                                     echo "--------------------------"
+                                    # Kiểm tra xem nội dung có phải là script npm không (đôi khi seeker trả về script install)
+                                    if grep -q "npm install" seeker-agent.tgz; then
+                                       echo "Cảnh báo: Server trả về hướng dẫn text thay vì binary. Kiểm tra lại URL."
+                                    fi
                                     exit 1
                                 else
                                     echo ">>> Tải thành công! (Size: $FILE_SIZE bytes)"
                                 fi
                             '''
+                            
                             echo "--- 2. Install Agent using NPM ---"
                             sh 'npm config set strict-ssl false'
+                            // Lệnh này sẽ bung file tgz ra và cài vào node_modules
                             sh 'npm install --no-save ./seeker-agent.tgz'
                             
                             echo "--- 3. Start App with Seeker ---"
@@ -86,13 +90,25 @@ pipeline {
                                 export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                # Tìm đường dẫn file agent
-                                AGENT_PATH="node_modules/@seeker/agent/index.mjs"
-                                if [ ! -f "\$AGENT_PATH" ]; then
+                                # Tìm đường dẫn file agent (Thường nằm trong @seeker/agent hoặc seeker-agent)
+                                # Logic tìm file index.mjs hoặc index.js của agent
+                                AGENT_PATH=""
+                                if [ -f "node_modules/@seeker/agent/index.mjs" ]; then
+                                    AGENT_PATH="node_modules/@seeker/agent/index.mjs"
+                                elif [ -f "node_modules/seeker-agent/index.js" ]; then
+                                    AGENT_PATH="node_modules/seeker-agent/index.js"
+                                else
+                                    # Fallback tìm kiếm
                                     AGENT_PATH=\$(find node_modules -name "index.mjs" | grep seeker | head -n 1)
+                                fi
+
+                                if [ -z "\$AGENT_PATH" ]; then
+                                    echo "ERROR: Không tìm thấy Seeker Agent trong node_modules"
+                                    exit 1
                                 fi
                                 
                                 echo ">>> Starting Node with Agent at: \$AGENT_PATH"
+                                # Node 18+ dùng --import, bản cũ hơn có thể cần -r (require)
                                 nohup node --import ./\$AGENT_PATH app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
