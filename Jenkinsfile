@@ -41,27 +41,25 @@ pipeline {
         // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
 	stage('2. IAST (Seeker)') {
             steps {
-                echo '--- [Test] Running IAST Only (Fixed from Image) ---'
+                echo '--- [Test] Running IAST Only (Fixed Quotes) ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
-		script {
+                    script {
                         def seekerUrl = "http://192.168.12.190:8082"
-                        // Tên dự án phải khớp y hệt trên Seeker (dùng dấu gạch ngang -)
                         def projectKey = "jenkins-hello-world"
                         
                         try {
                             echo "--- 1. Downloading Seeker Agent ---"
-                            // [ĐÃ SỬA] Thêm tham số &projectKey=${projectKey} vào URL
+                            // [SỬA LỖI Ở ĐÂY]
+                            // Thêm dấu nháy đơn ' ' bao quanh URL để bảo vệ dấu &
                             sh """
-                                curl -f -k -o seeker-agent.tgz "${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}"
+                                curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}'
                             """
 
                             echo "--- 2. Installing Agent ---"
                             sh 'npm config set strict-ssl false'
-                            // Cài đặt file vừa tải về
                             sh 'npm install --no-save ./seeker-agent.tgz'
 
                             echo "--- 3. Verifying Installation Path ---"
-                            // Tìm xem file index.mjs nằm ở đâu (đề phòng thư mục tên khác nhau)
                             sh 'find node_modules -name "index.mjs" | grep seeker'
 
                             echo "--- 4. Starting App with Seeker Agent ---"
@@ -71,8 +69,7 @@ pipeline {
                                 export SEEKER_PROJECT_KEY="${projectKey}"
                                 export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                # Tự động tìm đường dẫn file chạy của Agent
-                                # Lệnh này sẽ tìm file index.mjs trong folder node_modules có chưa từ 'seeker'
+                                # Tự động tìm đường dẫn file chạy
                                 AGENT_PATH=\$(find node_modules -name "index.mjs" | grep seeker | head -n 1)
                                 
                                 if [ -z "\$AGENT_PATH" ]; then
@@ -82,7 +79,6 @@ pipeline {
                                 
                                 echo ">>> Found Agent at: \$AGENT_PATH"
 
-                                # Chạy App với đường dẫn vừa tìm được
                                 nohup node --import ./\$AGENT_PATH app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
