@@ -39,9 +39,10 @@ pipeline {
         }
 
         // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
-	stage('2. IAST (Seeker)') {
+	// --- BƯỚC 2: CHẠY IAST (SEEKER) ---
+        stage('2. IAST (Seeker)') {
             steps {
-                echo '--- [Test] Running IAST Only (Fixed Quotes) ---'
+                echo '--- [Test] Running IAST Only (Fixed Binary Download) ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
                     script {
                         def seekerUrl = "http://192.168.12.190:8082"
@@ -49,41 +50,39 @@ pipeline {
                         
                         try {
                             echo "--- 1. Downloading Seeker Agent ---"
-                            // [SỬA LỖI Ở ĐÂY]
-                            // Thêm dấu nháy đơn ' ' bao quanh URL để bảo vệ dấu &
-			    sh '''
-   				 sh -c "$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' 'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=')"	
-			    '''
+                            // CHANGED: Direct binary download to 'seeker-agent.tgz'
+                            sh "curl -f -k -o seeker-agent.tgz '${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ&projectKey=${projectKey}'"
+
                             echo "--- 2. Installing Agent ---"
+                            // This will now work because seeker-agent.tgz actually exists
                             sh 'npm config set strict-ssl false'
                             sh 'npm install --no-save ./seeker-agent.tgz'
-
+                            
                             echo "--- 3. Verifying Installation Path ---"
                             sh 'find node_modules -name "index.mjs" | grep seeker'
 
                             echo "--- 4. Starting App with Seeker Agent ---"
+                            // ... (rest of your startup logic remains the same) ...
                             sh """
                                 export SEEKER_SERVER_URL="${seekerUrl}"
                                 export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_PROJECT_KEY="${projectKey}"
                                 export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                # Tự động tìm đường dẫn file chạy
                                 AGENT_PATH=\$(find node_modules -name "index.mjs" | grep seeker | head -n 1)
                                 
                                 if [ -z "\$AGENT_PATH" ]; then
-                                    echo "ERROR: Không tìm thấy file Agent!"
+                                    echo "ERROR: Agent not found!"
                                     exit 1
                                 fi
                                 
                                 echo ">>> Found Agent at: \$AGENT_PATH"
-
                                 nohup node --import ./\$AGENT_PATH app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
 
-                            // Healthcheck
-                            sh """
+                            // ... (Healthcheck and Traffic steps remain the same) ...
+                             sh """
                                 timeout=60
                                 while ! curl -s http://localhost:${APP_PORT} > /dev/null; do
                                     echo "Waiting for App..."
@@ -97,8 +96,7 @@ pipeline {
                                 done
                                 echo "App is READY!"
                             """
-
-                            // Generate Traffic
+                            
                             echo "--- Generating Traffic ---"
                             sh 'npm test || true' 
                             sh "curl -s http://localhost:${APP_PORT}/"
