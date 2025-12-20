@@ -39,41 +39,49 @@ pipeline {
         }
 
         // --- BƯỚC 2: CHẠY IAST (SEEKER) ---
-        stage('2. IAST (Seeker)') {
+	stage('2. IAST (Seeker)') {
             steps {
-                echo '--- [Test] Running IAST Only ---'
+                echo '--- [Test] Running IAST Only (Fixed from Image) ---'
                 withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_TOKEN')]) {
-		script {
+                    script {
                         def seekerUrl = "http://192.168.12.190:8082"
                         def projectKey = "jenkins_hello_world"
                         
                         try {
-                            echo "--- 1. Configuring NPM & Installing Agent ---"
-                            // Tắt SSL strict để tránh lỗi ngày giờ
+                            echo "--- 1. Downloading Seeker Agent ---"
+                            // Tải file .tgz trực tiếp từ API của Server bạn
+                            // API này tương đương với việc bạn bấm nút "Download" trong ảnh
+                            sh """
+                                curl -f -k -o seeker-agent.tgz "${seekerUrl}/rest/api/latest/installers/agents/binaries/NODEJS?flavor=TGZ"
+                            """
+
+                            echo "--- 2. Installing Agent ---"
                             sh 'npm config set strict-ssl false'
-                            sh 'npm config set registry "http://registry.npmjs.org/"'
-                            
-                            // Cài đặt Agent
-                            sh 'npm install --no-save @synopsys/seeker-agent'
+                            // Cài đặt file vừa tải về
+                            sh 'npm install --no-save ./seeker-agent.tgz'
 
-                            // [DEBUG] Kiểm tra xem file có thực sự tồn tại không?
-                            echo "--- DEBUG: Checking installed modules ---"
-                            sh 'ls -la node_modules/@synopsys/seeker-agent || echo "WARNING: Folder not found!"'
+                            echo "--- 3. Verifying Installation Path ---"
+                            // [QUAN TRỌNG] Tìm xem file index.mjs nằm chính xác ở đâu
+                            // Vì ảnh gợi ý tên gói là @seeker/agent, ta cần tìm đúng đường dẫn
+                            sh 'find node_modules -name "index.mjs" | grep seeker'
 
-                            echo "--- 2. Starting App with Seeker Agent ---"
+                            echo "--- 4. Starting App with Seeker Agent ---"
                             sh """
                                 export SEEKER_SERVER_URL="${seekerUrl}"
                                 export SEEKER_ACCESS_TOKEN="${env.SEEKER_TOKEN}"
                                 export SEEKER_PROJECT_KEY="${projectKey}"
-                                export SEEKER_AGENT_NAME="Jenkins-Test-IAST-${env.BUILD_NUMBER}"
+                                export SEEKER_AGENT_NAME="Jenkins-IAST-${env.BUILD_NUMBER}"
                                 
-                                # [SỬA LỖI Ở ĐÂY]
-                                # Thay vì gọi file index.js, ta gọi tên gói để Node tự tìm entrypoint
-                                nohup node -r @synopsys/seeker-agent app.js > app_iast.log 2>&1 &
+                                # [CẬP NHẬT THEO ẢNH]
+                                # Sử dụng --import thay vì -r
+                                # Trỏ vào file index.mjs trong thư mục vừa cài đặt
+                                # Đường dẫn chuẩn thường là: ./node_modules/@seeker/agent/index.mjs
+                                
+                                nohup node --import ./node_modules/@seeker/agent/index.mjs app.js > app_iast.log 2>&1 &
                                 echo \$! > iast_app.pid
                             """
 
-                            // 3. Healthcheck
+                            // Healthcheck (Giữ nguyên)
                             sh """
                                 timeout=60
                                 while ! curl -s http://localhost:${APP_PORT} > /dev/null; do
@@ -81,8 +89,7 @@ pipeline {
                                     sleep 2
                                     timeout=\$((timeout-2))
                                     if [ \$timeout -le 0 ]; then 
-                                        echo "TIMEOUT: App failed to start."
-                                        echo "--- LOG APP ---"
+                                        echo "TIMEOUT! Checking logs..."
                                         cat app_iast.log
                                         exit 1
                                     fi
@@ -90,7 +97,7 @@ pipeline {
                                 echo "App is READY!"
                             """
 
-                            // 4. Generate Traffic
+                            // Generate Traffic (Giữ nguyên)
                             echo "--- Generating Traffic ---"
                             sh 'npm test || true' 
                             sh "curl -s http://localhost:${APP_PORT}/"
@@ -98,11 +105,14 @@ pipeline {
 
                         } catch (Exception e) {
                             echo "IAST Error: ${e.toString()}"
+                            // Nếu lỗi, in log ra để xem đường dẫn file sai ở đâu
+                            sh 'cat app_iast.log || true'
                             currentBuild.result = 'FAILURE'
                         } finally {
                             if (fileExists('iast_app.pid')) {
                                 sh "kill \$(cat iast_app.pid) || true"
                             }
+                            sh 'rm -f seeker-agent.tgz'
                         }
                     }
                 }
