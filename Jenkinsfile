@@ -86,32 +86,54 @@ pipeline {
     }
 }                
 
-                stage('SAST (SonarQube)') {
+		stage('SAST (Coverity)') {
                     steps {
-                        script {
-                            def nodePath = sh(script: "which node", returnStdout: true).trim()
-                            withSonarQubeEnv('SonarCloud') { 
-                                echo '--- [Step] SonarScanner Analysis ---'
+                        // Lấy user/pass từ Jenkins Credentials
+                        withCredentials([usernamePassword(credentialsId: 'coverity-credentials', usernameVariable: 'COV_USER', passwordVariable: 'COV_PASS')]) {
+                            script {
+                                echo '--- [Step] Synopsys Coverity SAST ---'
+                                
+                                // --- CẤU HÌNH ---
+                                // Đường dẫn tới thư mục bin của Coverity Analysis trên Jenkins Server
+                                def covBin = "/path/to/cov-analysis/bin" 
+                                def covUrl = "http://192.168.16.87:8080"
+                                def covStream = "jenkins-hello-world-stream" // Tên stream bạn đã tạo trên Coverity Connect
+                                
+                                // Kiểm tra kết nối tới Coverity Connect trước khi chạy
+                                try {
+                                    sh "curl -sI --connect-timeout 5 ${covUrl} > /dev/null"
+                                    echo "Kết nối tới Coverity Connect OK!"
+                                } catch (Exception e) {
+                                    error("Lỗi: Không thể kết nối tới Coverity Connect tại ${covUrl}. Vui lòng kiểm tra Firewall/Mạng.")
+                                }
+
+                                // 1. Configure (Cấu hình compiler/language - chỉ cần chạy 1 lần hoặc chạy lại cũng không sao)
+                                // Với NodeJS (Interpreted language), ta cấu hình javascript/typescript
+                                sh "${covBin}/cov-configure --javascript || true"
+
+                                // 2. Build/Capture (Thu thập mã nguồn)
+                                // Với NodeJS, không có lệnh build thật, ta dùng --no-command và --fs-capture-search
+                                // Scan thư mục hiện tại (chứa src)
+                                sh "rm -rf idir" // Xóa thư mục tạm cũ
+                                sh "${covBin}/cov-build --dir idir --no-command --fs-capture-search ."
+
+                                // 3. Analyze (Phân tích lỗi)
+                                // --all: chạy tất cả checker, --webapp-security: bật các rule bảo mật web
+                                echo '--- Running Analysis ---'
+                                sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path $(pwd)"
+
+                                // 4. Commit Defects (Đẩy lỗi lên Coverity Connect)
+                                echo '--- Committing Results ---'
                                 sh """
-                                npx sonar-scanner \
-                                    -Dsonar.projectKey=k22022002_jenkins-hello-world \
-                                    -Dsonar.organization=k22022002 \
-                                    -Dsonar.sources=src \
-                                    -Dsonar.tests=test \
-                                    -Dsonar.host.url=https://sonarcloud.io \
-                                    -Dsonar.nodejs.executable="${nodePath}" \
-                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                                    ${covBin}/cov-commit-defects --dir idir \
+                                    --url ${covUrl} \
+                                    --stream ${covStream} \
+                                    --user \$COV_USER --password \$COV_PASS
                                 """
-                            }
-                            timeout(time: 5, unit: 'MINUTES') {
-                                waitForQualityGate abortPipeline: true
                             }
                         }
                     }
                 }
-            }
-        }
-
         stage('3. Build & Container Security') {
             steps {
                 echo '--- [Step] Build Artifacts & Container ---'
