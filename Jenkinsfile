@@ -129,6 +129,8 @@ pipeline {
                         }
                     }
                 }
+	    }
+	}
         stage('3. Build & Container Security') {
             steps {
                 echo '--- [Step] Build Artifacts & Container ---'
