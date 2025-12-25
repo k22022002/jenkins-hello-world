@@ -85,44 +85,39 @@ pipeline {
         }
     }
 }                
-
-		stage('SAST (Coverity)') {
+	stage('SAST (Coverity)') {
                     steps {
-                        // Lấy user/pass từ Jenkins Credentials
                         withCredentials([usernamePassword(credentialsId: 'coverity-credentials', usernameVariable: 'COV_USER', passwordVariable: 'COV_PASS')]) {
                             script {
                                 echo '--- [Step] Synopsys Coverity SAST ---'
                                 
-                                // --- CẤU HÌNH ---
-                                // Đường dẫn tới thư mục bin của Coverity Analysis trên Jenkins Server
-                                def covBin = "/path/to/cov-analysis/bin" 
-                                def covUrl = "http://192.168.16.87:8080"
-                                def covStream = "jenkins-hello-world-stream" // Tên stream bạn đã tạo trên Coverity Connect
+                                // --- CẤU HÌNH MỚI (Đã cập nhật đúng đường dẫn của bạn) ---
+                                def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
                                 
-                                // Kiểm tra kết nối tới Coverity Connect trước khi chạy
+                                def covUrl = "http://192.168.16.87:8080"
+                                def covStream = "jenkins-hello-world-stream" 
+                                
+                                // Kiểm tra kết nối
                                 try {
                                     sh "curl -sI --connect-timeout 5 ${covUrl} > /dev/null"
-                                    echo "Kết nối tới Coverity Connect OK!"
+                                    echo "Coverity Connect OK!"
                                 } catch (Exception e) {
-                                    error("Lỗi: Không thể kết nối tới Coverity Connect tại ${covUrl}. Vui lòng kiểm tra Firewall/Mạng.")
+                                    error("Lỗi kết nối tới Coverity Connect ${covUrl}")
                                 }
 
-                                // 1. Configure (Cấu hình compiler/language - chỉ cần chạy 1 lần hoặc chạy lại cũng không sao)
-                                // Với NodeJS (Interpreted language), ta cấu hình javascript/typescript
+                                // 1. Configure
                                 sh "${covBin}/cov-configure --javascript || true"
 
-                                // 2. Build/Capture (Thu thập mã nguồn)
-                                // Với NodeJS, không có lệnh build thật, ta dùng --no-command và --fs-capture-search
-                                // Scan thư mục hiện tại (chứa src)
-                                sh "rm -rf idir" // Xóa thư mục tạm cũ
+                                // 2. Build/Capture
+                                sh "rm -rf idir" 
                                 sh "${covBin}/cov-build --dir idir --no-command --fs-capture-search ."
 
-                                // 3. Analyze (Phân tích lỗi)
-                                // --all: chạy tất cả checker, --webapp-security: bật các rule bảo mật web
+                                // 3. Analyze
                                 echo '--- Running Analysis ---'
-                                sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path $(pwd)"
+                                // Đã có dấu \ trước $(pwd) để tránh lỗi cú pháp
+                                sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path \$(pwd)"
 
-                                // 4. Commit Defects (Đẩy lỗi lên Coverity Connect)
+                                // 4. Commit Defects
                                 echo '--- Committing Results ---'
                                 sh """
                                     ${covBin}/cov-commit-defects --dir idir \
