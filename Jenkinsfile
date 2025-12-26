@@ -94,7 +94,7 @@ pipeline {
                                 // --- CẤU HÌNH MỚI (Đã cập nhật đúng đường dẫn của bạn) ---
                                 def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
                                 
-                                def covUrl = "http://192.168.16.87:8080"
+                                def covUrl = "http://192.168.12.190:8081"
                                 def covStream = "jenkins-hello-world-stream" 
                                 
                                 // Kiểm tra kết nối
