@@ -89,35 +89,34 @@ pipeline {
                     steps {
                         withCredentials([usernamePassword(credentialsId: 'coverity-credentials', usernameVariable: 'COV_USER', passwordVariable: 'COV_PASS')]) {
                             script {
-                                echo '--- [Step] Synopsys Coverity SAST ---'
+                                echo '--- [Step] Synopsys Coverity SAST (Local) ---'
                                 
-                                // --- CẤU HÌNH MỚI (Đã cập nhật đúng đường dẫn của bạn) ---
+                                // ĐƯỜNG DẪN CỦA BẠN (Giữ nguyên)
                                 def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
-                                
                                 def covUrl = "http://192.168.12.190:8081"
                                 def covStream = "jenkins-hello-world-stream" 
                                 
                                 // Kiểm tra kết nối
                                 try {
                                     sh "curl -sI --connect-timeout 5 ${covUrl} > /dev/null"
-                                    echo "Coverity Connect OK!"
+                                    echo "Kết nối Coverity Localhost OK!"
                                 } catch (Exception e) {
-                                    error("Lỗi kết nối tới Coverity Connect ${covUrl}")
+                                    echo "Warning: Chưa kết nối được Coverity Server, nhưng sẽ vẫn chạy Capture."
                                 }
 
                                 // 1. Configure
                                 sh "${covBin}/cov-configure --javascript || true"
 
-                                // 2. Build/Capture
+                                // 2. Capture (ĐÃ SỬA LỖI TẠI ĐÂY)
                                 sh "rm -rf idir" 
-                                sh "${covBin}/cov-build --dir idir --no-command --fs-capture-search ."
+                                // Dùng cov-capture thay vì cov-build --no-command
+                                sh "${covBin}/cov-capture --dir idir --source-dir ."
 
                                 // 3. Analyze
                                 echo '--- Running Analysis ---'
-                                // Đã có dấu \ trước $(pwd) để tránh lỗi cú pháp
                                 sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path \$(pwd)"
 
-                                // 4. Commit Defects
+                                // 4. Commit
                                 echo '--- Committing Results ---'
                                 sh """
                                     ${covBin}/cov-commit-defects --dir idir \
