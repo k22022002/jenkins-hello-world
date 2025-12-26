@@ -91,7 +91,6 @@ pipeline {
                             script {
                                 echo '--- [Step] Synopsys Coverity SAST (Local) ---'
                                 
-                                // ĐƯỜNG DẪN CỦA BẠN (Giữ nguyên)
                                 def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
                                 def covUrl = "http://192.168.12.190:8081"
                                 def covStream = "jenkins-hello-world-stream" 
@@ -101,16 +100,16 @@ pipeline {
                                     sh "curl -sI --connect-timeout 5 ${covUrl} > /dev/null"
                                     echo "Kết nối Coverity Localhost OK!"
                                 } catch (Exception e) {
-                                    echo "Warning: Chưa kết nối được Coverity Server, nhưng sẽ vẫn chạy Capture."
+                                    echo "Warning: Chưa kết nối được Coverity Server."
                                 }
 
                                 // 1. Configure
                                 sh "${covBin}/cov-configure --javascript || true"
 
-                                // 2. Capture (ĐÃ SỬA LỖI TẠI ĐÂY)
+                                // 2. Capture (FIXED)
                                 sh "rm -rf idir" 
-                                // Dùng cov-capture thay vì cov-build --no-command
-                                sh "${covBin}/cov-capture --dir idir --source-dir ."
+                                // Mẹo: Dùng 'sh -c true' làm lệnh build giả
+                                sh "${covBin}/cov-build --dir idir --fs-capture-search . sh -c 'true'"
 
                                 // 3. Analyze
                                 echo '--- Running Analysis ---'
