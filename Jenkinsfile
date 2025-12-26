@@ -91,8 +91,9 @@ pipeline {
                             script {
                                 echo '--- [Step] Synopsys Coverity SAST (Local) ---'
                                 
+                                // ĐƯỜNG DẪN CỦA BẠN
                                 def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
-                                def covUrl = "http://192.168.12.190:8081"
+                                def covUrl = "http://localhost:8081"
                                 def covStream = "jenkins-hello-world-stream" 
                                 
                                 // Kiểm tra kết nối
@@ -103,19 +104,23 @@ pipeline {
                                     echo "Warning: Chưa kết nối được Coverity Server."
                                 }
 
-                                // 1. Configure
+                                // 1. Configure (Vẫn giữ để đảm bảo cấu hình cho JS)
+                                // cov-configure vẫn tồn tại trong danh sách file [cite: 11]
                                 sh "${covBin}/cov-configure --javascript || true"
 
-                                // 2. Capture (FIXED)
+                                // 2. Capture (DÙNG LỆNH MỚI 'coverity')
                                 sh "rm -rf idir" 
-                                // Mẹo: Dùng 'sh -c true' làm lệnh build giả
-                                sh "${covBin}/cov-build --dir idir --fs-capture-search . sh -c 'true'"
+                                
+                                // Sử dụng Coverity CLI  để tự động capture code NodeJS
+                                // --project-dir .: Thư mục chứa code (hiện tại)
+                                // --dir idir: Thư mục lưu kết quả capture (để bước sau dùng)
+                                sh "${covBin}/coverity capture --project-dir . --dir idir"
 
-                                // 3. Analyze
+                                // 3. Analyze (Vẫn dùng cov-analyze )
                                 echo '--- Running Analysis ---'
                                 sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path \$(pwd)"
 
-                                // 4. Commit
+                                // 4. Commit (Vẫn dùng cov-commit-defects )
                                 echo '--- Committing Results ---'
                                 sh """
                                     ${covBin}/cov-commit-defects --dir idir \
