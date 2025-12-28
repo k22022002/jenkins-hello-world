@@ -203,24 +203,18 @@ pipeline {
                     // Đảm bảo ID này đúng với trên Jenkins (seeker-agent-token)
                     withCredentials([string(credentialsId: 'seeker-agent-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                         
-                        // 1. Dọn dẹp thư mục cũ
-                        sh "rm -rf seeker install_seeker.sh app_iast.log || true"
-
-                        // 2. Tải Script Cài đặt (Thay vì tải file nén)
+		    // 2. Tải Seeker Installer Script (Đã sửa lỗi HTTP 400)
                         echo "--- Downloading Seeker Installer Script ---"
-                        // Sử dụng nháy đơn '''...''' để tránh lỗi bảo mật biến của Jenkins
-                        // Thêm cờ -L để follow redirect, -k để bỏ qua SSL
+                        
+                        // [FIX] Thêm lại tham số 'projectKey' và 'webServer' bị thiếu so với code gốc
                         sh '''
-                            curl -k -f -L "http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&flavor=DEFAULT&accessToken=$SEEKER_ACCESS_TOKEN" -o install_seeker.sh
+                            curl -k -f -L "http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&accessToken=$SEEKER_ACCESS_TOKEN" -o install_seeker.sh
                         '''
 
                         // 3. Chạy Script Cài đặt
                         echo "--- Running Installer ---"
-                        // Script này sẽ tự động tải agent và giải nén vào thư mục 'seeker'
-                        // [QUAN TRỌNG] Không cần chạy lệnh 'tar' thủ công nữa
                         sh "chmod +x install_seeker.sh"
                         sh "./install_seeker.sh"
-
                         // 4. Xác định file chạy của Agent
                         // Mặc định installer sẽ tạo thư mục 'seeker' tại workspace hiện tại
                         def agentDir = "${env.WORKSPACE}/seeker"
