@@ -3,7 +3,7 @@ FROM node:18-alpine
 
 # 2. [Bảo mật] Cài đặt dumb-init để xử lý tín hiệu hệ thống (PID 1) tốt hơn
 # Giúp container tắt mượt mà (graceful shutdown) khi deploy lại
-RUN apk add --no-cache dumb-init
+RUN sed -i 's/https/http/' /etc/apk/repositories &&  apk add --no-cache dumb-init
 
 # 3. Thiết lập biến môi trường mặc định (Có thể ghi đè từ Jenkins/K8s)
 ENV NODE_ENV=production
