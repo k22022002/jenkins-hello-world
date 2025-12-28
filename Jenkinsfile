@@ -201,76 +201,66 @@ pipeline {
             echo '--- [Step] Synopsys Seeker IAST Setup ---'
             withCredentials([string(credentialsId: 'seeker-agent-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                 
-                // 1. Chuẩn bị thư mục
                 def agentDir = "${env.WORKSPACE}/seeker"
                 sh "rm -rf ${agentDir} && mkdir -p ${agentDir}"
 
-                // 2. Tải Seeker Installer
-                echo "--- Downloading Seeker Installer Script ---"
-                // Lưu ý: Đã thêm --install-dir vào lệnh chạy script luôn
+                // 1. Tải về
                 sh '''
                     curl -k -f -L "http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&accessToken=$SEEKER_ACCESS_TOKEN" -o install_seeker.sh
+                    chmod +x install_seeker.sh
                 '''
-                
-                sh "chmod +x install_seeker.sh"
-                
-                // Chạy script cài đặt với chỉ định thư mục
-                // Thêm '|| true' để nếu script báo lỗi (do thiếu unzip) thì ta vẫn tự xử lý ở dưới
                 sh "./install_seeker.sh --install-dir ${agentDir} --no-prompt || true"
 
-                // ================= [FIX QUAN TRỌNG: GIẢI NÉN THỦ CÔNG] =================
-                echo "--- Checking & Extracting Agent ---"
+                // 2. GIẢI NÉN ĐA LỚP (Sửa lỗi logic cũ)
+                echo "--- Extracting Agent (Nested Archives) ---"
                 dir(agentDir) {
+                    // Bước 1: Giải nén file ZIP (Lớp ngoài)
                     if (fileExists('agent_NODEJS.zip')) {
-                        echo ">>> Found ZIP file, extracting..."
-                        // Kiểm tra unzip có tồn tại không, nếu không thì dùng python hoặc jar để giải nén (vì Jenkins agent chắc chắn có Java)
+                        echo ">>> Layer 1: Unzipping agent_NODEJS.zip..."
                         try {
                             sh "unzip -o agent_NODEJS.zip"
                         } catch (Exception e) {
-                            echo "Unzip not found, trying jar..."
-                            sh "jar xf agent_NODEJS.zip" // Fallback nếu không có unzip
+                            // Fallback nếu không có unzip, dùng python
+                            sh "python3 -c \"import zipfile; import sys; zipfile.ZipFile('agent_NODEJS.zip', 'r').extractall('.')\""
                         }
-                    } else if (fileExists('seeker-agent.tgz')) {
-                        echo ">>> Found TGZ file, extracting..."
+                    }
+
+                    // Bước 2: Giải nén file TGZ (Lớp trong - Vừa được sinh ra từ file ZIP)
+                    if (fileExists('seeker-agent.tgz')) {
+                        echo ">>> Layer 2: Extracting seeker-agent.tgz..."
                         sh "tar -xzf seeker-agent.tgz"
                     }
                 }
-                // ========================================================================
 
-                // 4. Tìm file chạy của Agent (Đã update logic tìm kiếm)
-                def agentFile = ""
-                // Tìm kiếm file index.js/.mjs trong thư mục seeker và các thư mục con cấp 1
-                agentFile = sh(script: "find ${agentDir} -maxdepth 3 -name index.mjs -o -name index.js | head -n 1", returnStdout: true).trim()
+                // 3. Tìm file chạy (Sau khi đã giải nén cả 2 lớp)
+                // Seeker thường nằm trong folder tên là 'seeker-agent' sau khi giải nén tgz
+                def agentFile = sh(script: "find ${agentDir} -name index.js -o -name index.mjs | head -n 1", returnStdout: true).trim()
 
                 if (agentFile == "") {
-                    sh "ls -R ${agentDir}" // List file để debug lần cuối
-                    error "LỖI: Vẫn không tìm thấy file index.js sau khi giải nén."
+                    sh "ls -R ${agentDir}"
+                    error "LỖI: Không tìm thấy index.js ngay cả sau khi giải nén 2 lớp."
                 }
                 echo ">>> FOUND AGENT AT: ${agentFile}"
 
-                // 5. Cấu hình & Chạy App
+                // 4. Chạy App
                 env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
                 env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
                 
-                echo "--- Starting App with Seeker ---"
                 sh "pkill -f node || true"
-                
-                // Quan trọng: Đường dẫn agentFile phải tuyệt đối
                 sh "NODE_OPTIONS='--import \"${agentFile}\"' nohup npm start > app_iast.log 2>&1 &"
                 
                 sh "sleep 15"
-                sh "cat app_iast.log" // Xem log ứng dụng
+                sh "cat app_iast.log"
                 
-                // Check process
                 if (sh(script: "pgrep -f 'node' > /dev/null && echo 'YES' || echo 'NO'", returnStdout: true).trim() == 'YES') {
-                    echo ">>> SUCCESS: App running with Seeker"
+                    echo "SUCCESS: App running with Seeker"
                     try {
                         sh "curl -v http://localhost:3000 || true" 
                     } finally {
                         sh "pkill -f node || true"
                     }
                 } else {
-                    error ">>> App crashed."
+                    error "App crashed."
                 }
             }
         }
