@@ -33,7 +33,7 @@ pipeline {
 
     stages {
         // --- BƯỚC 1: INITIALIZE ---
-        [cite_start]stage('1. Initialize, Test & Check Standards') { [cite: 12]
+        stage('1. Initialize, Test & Check Standards') { 
             steps {
                 echo '--- [Step] Checkout & Install ---'
                 cleanWs() 
