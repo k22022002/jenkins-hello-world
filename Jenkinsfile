@@ -196,72 +196,71 @@ pipeline {
             }
         }
 
-        // --- BƯỚC 4: IAST (THAY THẾ DAST) ---
-        stage('4. IAST (Synopsys Seeker)') {
+	stage('4. IAST (Synopsys Seeker)') {
             steps {
                 script {
                     echo '--- [Step] Synopsys Seeker IAST Setup ---'
+                    // Đảm bảo ID này đúng với trên Jenkins (seeker-agent-token)
                     withCredentials([string(credentialsId: 'seeker-agent-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                         
-                        // 1. Reset thư mục
-                        sh "rm -rf seeker app_iast.log || true"
+                        // 1. Dọn dẹp thư mục cũ
+                        sh "rm -rf seeker install_seeker.sh app_iast.log || true"
 
-                        // 2. Tải Seeker Agent
-                        echo "--- Downloading Seeker Agent Package ---"
+                        // 2. Tải Script Cài đặt (Thay vì tải file nén)
+                        echo "--- Downloading Seeker Installer Script ---"
+                        // Sử dụng nháy đơn '''...''' để tránh lỗi bảo mật biến của Jenkins
+                        // Thêm cờ -L để follow redirect, -k để bỏ qua SSL
+                        sh '''
+                            curl -k -f -L "http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&flavor=DEFAULT&accessToken=$SEEKER_ACCESS_TOKEN" -o install_seeker.sh
+                        '''
+
+                        // 3. Chạy Script Cài đặt
+                        echo "--- Running Installer ---"
+                        // Script này sẽ tự động tải agent và giải nén vào thư mục 'seeker'
+                        // [QUAN TRỌNG] Không cần chạy lệnh 'tar' thủ công nữa
+                        sh "chmod +x install_seeker.sh"
+                        sh "./install_seeker.sh"
+
+                        // 4. Xác định file chạy của Agent
+                        // Mặc định installer sẽ tạo thư mục 'seeker' tại workspace hiện tại
+                        def agentDir = "${env.WORKSPACE}/seeker"
                         
-                        // [FIX] 
-                        // - Dùng URL /binaries/ thay vì /scripts/
-                        // - Dùng -o để lưu thành file seeker-agent.tgz
-                        // - Dùng -k để bỏ qua lỗi SSL
-                        sh """
-                            curl -k -f -o seeker-agent.tgz \
-                            "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=DEFAULT&accessToken=${SEEKER_ACCESS_TOKEN}"
-                        """
-                        
-                        // Kiểm tra file đã tải chưa
-                        sh "ls -lh seeker-agent.tgz"
-                        // 3. Giải nén Agent
-                        echo "--- Extracting Agent ---"
-                        dir('seeker') {
-                            sh "tar -xzf seeker-agent.tgz"
-                            sh "mv package agent-core"
-                            sh "ls -F agent-core/"
+                        // Kiểm tra xem cài đặt thành công chưa
+                        if (!fileExists(agentDir)) {
+                            error "LỖI: Thư mục 'seeker' không tồn tại. Có thể script cài đặt đã thất bại."
                         }
 
-                        // 4. Xác định đường dẫn file chạy Agent
-                        def agentDir = "${env.WORKSPACE}/seeker/agent-core"
+                        // Tìm file index.js hoặc index.mjs
                         def agentFile = ""
-                        
                         if (fileExists("${agentDir}/index.mjs")) {
                            agentFile = "${agentDir}/index.mjs"
                         } else if (fileExists("${agentDir}/index.js")) {
                             agentFile = "${agentDir}/index.js"
                         } else {
-                            echo "--- Warning: Standard index file not found. Searching... ---"
+                            // Tìm kiếm file nếu cấu trúc thư mục khác
                             agentFile = sh(script: "find ${agentDir} -name index.mjs -o -name index.js | head -n 1", returnStdout: true).trim()
                         }
 
                         if (agentFile == "") {
-                            sh "ls -R seeker"
-                            error "LỖI: Không tìm thấy file chạy của Agent sau khi giải nén."
+                            error "LỖI: Không tìm thấy file chạy của Agent (index.js/mjs) trong thư mục seeker."
                         }
                         echo ">>> FOUND AGENT AT: ${agentFile}"
 
-                        // 5. Cấu hình môi trường cho Seeker
+                        // 5. Cấu hình môi trường Seeker
                         env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
                         env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
                         
-                        // 6. Chạy App kèm Agent
-                        echo "--- Starting App ---"
+                        // 6. Chạy App kèm IAST Agent
+                        echo "--- Starting App with Seeker ---"
+                        // Tắt process cũ nếu có
                         sh "pkill -f node || true"
                         
-                        // Chạy App với đường dẫn tuyệt đối tới file agent
-                        // Dùng nohup để chạy nền
+                        // Chạy App
                         sh "NODE_OPTIONS='--import \"${agentFile}\"' nohup npm start > app_iast.log 2>&1 &"
                         
                         sh "sleep 15" // Đợi App khởi động
 
-                        // 7. Kiểm tra logs
+                        // 7. Kiểm tra kết quả
                         echo "================ APP LOGS ================"
                         sh "cat app_iast.log"
                         echo "=========================================="
@@ -272,7 +271,6 @@ pipeline {
                             echo ">>> SUCCESS: App is running with Seeker!"
                             try {
                                 echo "--- Sending Traffic for IAST Analysis ---"
-                                // Gọi traffic vào localhost để Seeker bắt dữ liệu
                                 sh "curl -v http://localhost:${APP_PORT} || true"
                                 sh "npm test" 
                             } finally {
@@ -286,7 +284,6 @@ pipeline {
                 }
             }
         }
-
         // --- BƯỚC 5: SBOM CODE ---
         stage('5. Generate Code SBOM') {
             steps {
