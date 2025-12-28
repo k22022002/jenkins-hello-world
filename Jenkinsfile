@@ -201,7 +201,7 @@ pipeline {
             steps {
                 script {
                     echo '--- [Step] Synopsys Seeker IAST Setup ---'
-                    withCredentials([string(credentialsId: 'seeker-access-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
+                    withCredentials([string(credentialsId: 'seeker-agent-token', variable: 'SEEKER_ACCESS_TOKEN')]) {
                         
                         // 1. Reset thư mục
                         sh "rm -rf seeker app_iast.log || true"
