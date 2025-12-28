@@ -205,78 +205,72 @@ pipeline {
                 def agentDir = "${env.WORKSPACE}/seeker"
                 sh "rm -rf ${agentDir} && mkdir -p ${agentDir}"
 
-                // 2. Tải Seeker Installer Script
+                // 2. Tải Seeker Installer
                 echo "--- Downloading Seeker Installer Script ---"
-                // Thêm tham số osFamily và flavor rõ ràng
+                // Lưu ý: Đã thêm --install-dir vào lệnh chạy script luôn
                 sh '''
                     curl -k -f -L "http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&accessToken=$SEEKER_ACCESS_TOKEN" -o install_seeker.sh
                 '''
-
-                // 3. Chạy Script Cài đặt
-                echo "--- Running Installer ---"
+                
                 sh "chmod +x install_seeker.sh"
                 
-                // [FIX] Ép cài đặt vào thư mục đã tạo (agentDir) thay vì mặc định
-                // Nếu lệnh này thất bại, script sẽ in ra hướng dẫn (help) để bạn biết tham số đúng
-                try {
-                     sh "./install_seeker.sh --install-dir ${agentDir} --no-prompt"
-                } catch (Exception e) {
-                     echo "First install attempt failed, checking help..."
-                     sh "./install_seeker.sh --help || true"
-                     error "Lỗi cài đặt agent. Vui lòng kiểm tra log ở trên xem script yêu cầu tham số gì."
-                }
+                // Chạy script cài đặt với chỉ định thư mục
+                // Thêm '|| true' để nếu script báo lỗi (do thiếu unzip) thì ta vẫn tự xử lý ở dưới
+                sh "./install_seeker.sh --install-dir ${agentDir} --no-prompt || true"
 
-                // 4. Xác định file chạy của Agent
-                // Kiểm tra xem cài đặt thành công chưa
-                if (!fileExists(agentDir)) {
-                    sh "ls -la ${env.WORKSPACE}" // Debug xem nó nằm đâu
-                    error "LỖI: Thư mục 'seeker' không tồn tại."
+                // ================= [FIX QUAN TRỌNG: GIẢI NÉN THỦ CÔNG] =================
+                echo "--- Checking & Extracting Agent ---"
+                dir(agentDir) {
+                    if (fileExists('agent_NODEJS.zip')) {
+                        echo ">>> Found ZIP file, extracting..."
+                        // Kiểm tra unzip có tồn tại không, nếu không thì dùng python hoặc jar để giải nén (vì Jenkins agent chắc chắn có Java)
+                        try {
+                            sh "unzip -o agent_NODEJS.zip"
+                        } catch (Exception e) {
+                            echo "Unzip not found, trying jar..."
+                            sh "jar xf agent_NODEJS.zip" // Fallback nếu không có unzip
+                        }
+                    } else if (fileExists('seeker-agent.tgz')) {
+                        echo ">>> Found TGZ file, extracting..."
+                        sh "tar -xzf seeker-agent.tgz"
+                    }
                 }
+                // ========================================================================
 
-                // Tìm file index.js hoặc index.mjs
+                // 4. Tìm file chạy của Agent (Đã update logic tìm kiếm)
                 def agentFile = ""
-                // Tìm kiếm đệ quy (recursive) vì đôi khi nó tạo thêm thư mục con (ví dụ: seeker/seeker-agent-1.0.0/index.js)
-                agentFile = sh(script: "find ${agentDir} -name index.mjs -o -name index.js | head -n 1", returnStdout: true).trim()
+                // Tìm kiếm file index.js/.mjs trong thư mục seeker và các thư mục con cấp 1
+                agentFile = sh(script: "find ${agentDir} -maxdepth 3 -name index.mjs -o -name index.js | head -n 1", returnStdout: true).trim()
 
                 if (agentFile == "") {
-                    // [DEBUG FINAL] Nếu không tìm thấy, in ra toàn bộ cấu trúc thư mục để debug
-                    sh "find ${agentDir} -maxdepth 3"
-                    error "LỖI: Không tìm thấy file chạy của Agent (index.js/mjs)."
+                    sh "ls -R ${agentDir}" // List file để debug lần cuối
+                    error "LỖI: Vẫn không tìm thấy file index.js sau khi giải nén."
                 }
                 echo ">>> FOUND AGENT AT: ${agentFile}"
 
-                // 5. Cấu hình môi trường Seeker
+                // 5. Cấu hình & Chạy App
                 env.SEEKER_SERVER_URL = "http://192.168.12.190:8082"
                 env.SEEKER_PROJECT_KEY = "jenkins-hello-world"
                 
-                // 6. Chạy App kèm IAST Agent
                 echo "--- Starting App with Seeker ---"
                 sh "pkill -f node || true"
                 
-                // Sử dụng agentFile đã tìm thấy chính xác
+                // Quan trọng: Đường dẫn agentFile phải tuyệt đối
                 sh "NODE_OPTIONS='--import \"${agentFile}\"' nohup npm start > app_iast.log 2>&1 &"
                 
                 sh "sleep 15"
-
-                // 7. Kiểm tra kết quả
-                echo "================ APP LOGS ================"
-                sh "cat app_iast.log"
-                echo "=========================================="
+                sh "cat app_iast.log" // Xem log ứng dụng
                 
-                def isRunning = sh(script: "pgrep -f 'node' > /dev/null && echo 'YES' || echo 'NO'", returnStdout: true).trim()
-
-                if (isRunning == 'YES') {
-                    echo ">>> SUCCESS: App is running with Seeker!"
+                // Check process
+                if (sh(script: "pgrep -f 'node' > /dev/null && echo 'YES' || echo 'NO'", returnStdout: true).trim() == 'YES') {
+                    echo ">>> SUCCESS: App running with Seeker"
                     try {
-                        echo "--- Sending Traffic for IAST Analysis ---"
-                        // Thay APP_PORT bằng port thực tế của bạn (ví dụ 3000)
                         sh "curl -v http://localhost:3000 || true" 
                     } finally {
-                        sh "sleep 5"
                         sh "pkill -f node || true"
                     }
                 } else {
-                    error ">>> App crashed. Kiểm tra log ở trên."
+                    error ">>> App crashed."
                 }
             }
         }
