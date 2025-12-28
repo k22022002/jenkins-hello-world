@@ -42,7 +42,7 @@ pipeline {
                 script {
                     // 1. Install Cosign (Tool ký số)
                     sh 'rm -f cosign'
-                    sh 'curl -sSL --retry 5 --retry-delay 5 "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign'
+                    sh 'curl -k  -sSL --retry 5 --retry-delay 5 "https://github.com/sigstore/cosign/releases/download/v2.2.4/cosign-linux-amd64" -o cosign'
                     sh 'chmod +x cosign'
                     sh './cosign version'                    
                   
