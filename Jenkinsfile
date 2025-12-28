@@ -278,7 +278,7 @@ pipeline {
                     file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_PATH')
                 ]) { 
                      script {
-                        def cosignCmd = (fileExists('cosign')) ? [cite_start]'./cosign' : 'cosign' 
+                        def cosignCmd = (fileExists('cosign')) ? './cosign' : 'cosign' 
 
                         // Setup Key
                         sh "cp \$COSIGN_KEY_PATH cosign.key" 
