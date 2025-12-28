@@ -207,13 +207,19 @@ pipeline {
                         sh "rm -rf seeker app_iast.log || true"
 
                         // 2. Tải Seeker Agent
-                        echo "--- Downloading Seeker Agent ---"
-                        // Lưu ý: IP và URL này đang hardcode theo môi trường của bạn (từ File 1)
+                        echo "--- Downloading Seeker Agent Package ---"
+                        
+                        // [FIX] 
+                        // - Dùng URL /binaries/ thay vì /scripts/
+                        // - Dùng -o để lưu thành file seeker-agent.tgz
+                        // - Dùng -k để bỏ qua lỗi SSL
                         sh """
-                             sh -c "\$(curl -k -X GET -fsSL --header 'Accept: application/x-sh' \
-                            'http://192.168.12.190:8082/rest/api/latest/installers/agents/scripts/NODEJS?osFamily=LINUX&downloadWith=curl&projectKey=jenkins-hello-world&webServer=NODEJS_DOWNLOAD&flavor=DEFAULT&agentName=&accessToken=${SEEKER_ACCESS_TOKEN}')"
+                            curl -k -f -o seeker-agent.tgz \
+                            "http://192.168.12.190:8082/rest/api/latest/installers/agents/binaries/NODEJS?flavor=DEFAULT&accessToken=${SEEKER_ACCESS_TOKEN}"
                         """
-
+                        
+                        // Kiểm tra file đã tải chưa
+                        sh "ls -lh seeker-agent.tgz"
                         // 3. Giải nén Agent
                         echo "--- Extracting Agent ---"
                         dir('seeker') {
