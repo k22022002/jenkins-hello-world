@@ -18,8 +18,7 @@ COPY package.json package-lock.json ./
 # 6. Cài đặt dependency
 # --omit=dev: Giảm kích thước image
 # && npm cache clean --force: Xóa cache npm để giảm rác
-RUN npm ci --omit=dev && npm cache clean --force
-
+RUN npm install --omit=dev
 # 7. Copy source code
 COPY . .
 

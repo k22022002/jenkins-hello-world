@@ -1,25 +1,22 @@
-# --- CÁC FILE CẦN CHẶN ---
-node_modules
+# --- CÁC THƯ MỤC HỆ THỐNG & RÁC ---
 .git
 .gitignore
-cosign
-cosign.pub
-cosign.key
-cosign.bundle
-*.tgz
-*.sig
-
-# Chặn tất cả file json (như sbom.json, provenance.json...)
-*.json 
-
-# Chặn log và report
-dependency-check-report.html
-dependency-check-report.xml
-coverage/
+.dockerignore
 Dockerfile
 Jenkinsfile
+README.md
 
-# --- QUAN TRỌNG: MỞ KHÓA CHO PACKAGE ---
-# Dấu ! nghĩa là "Không chặn file này" (Exception)
-!package.json
-!package-lock.json
+# --- QUAN TRỌNG NHẤT: CHẶN NODE_MODULES Ở MÁY THẬT ---
+# Nếu không chặn dòng này, lệnh "COPY . ." sẽ chép đè folder rỗng/lỗi 
+# từ máy bạn vào container, làm mất folder đã cài bằng "npm ci"
+node_modules
+npm-debug.log
+
+# --- CÁC FILE LOG & REPORT ---
+coverage/
+dependency-check-report.html
+dependency-check-report.xml
+
+# --- KHÔNG CHẶN *.json ---
+# Xóa bỏ dòng *.json cũ để tránh rủi ro chặn nhầm file config
+# Docker tự động hiểu package.json cần thiết nhờ lệnh COPY trong Dockerfile
