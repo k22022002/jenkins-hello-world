@@ -363,27 +363,37 @@ pipeline {
             }
         }
         
-        // --- BƯỚC 9: DEPLOY ---
+	// --- BƯỚC 9: DEPLOY ---
         stage('9. Deploy') {
             steps {
                 echo '--- [Step] Deploying to Production ---'
                 script {
+                    def containerName = "jenkins-hello-world-prod"
+                    
                     echo "Deploying Docker Image: ${DOCKER_IMAGE}..."
-                    echo "Deploy SUCCESS!"
+                    
+                    // 1. Stop & Remove container cũ (nếu đang chạy) để tránh lỗi conflict tên
+                    sh "docker rm -f ${containerName} || true"
+
+                    // 2. Run container mới
+                    // -d: Chạy ngầm (Detached)
+                    // -p: Map port 3000 của máy chủ vào port 3000 của container (APP_PORT định nghĩa ở trên )
+                    // --name: Đặt tên cố định để dễ quản lý/stop sau này
+                    sh """
+                        docker run -d \
+                        --restart unless-stopped \
+                        --name ${containerName} \
+                        -p ${APP_PORT}:${APP_PORT} \
+                        ${DOCKER_IMAGE}
+                    """
+                    
+                    // 3. Kiểm tra xem container đã lên chưa
+                    sh "sleep 5" // Đợi 5s để app khởi động
+                    sh "docker ps | grep ${containerName}"
+                    echo "Deploy SUCCESS! App is running at http://<JENKINS_AGENT_IP>:${APP_PORT}"
                 }
             }
         }
-
-        // --- BƯỚC 10: UPLOAD ---
-        stage('10. Upload Artifacts & Reports') {
-            steps {
-                echo '--- [Step] Archiving Artifacts ---'
-                // Lưu trữ tất cả (đã bỏ báo cáo DAST zap-report.html khỏi danh sách archive vì không chạy nữa)
-                archiveArtifacts artifacts: "${ARTIFACT_NAME}, ${PROVENANCE_FILE}, ${SIGNATURE_FILE}, ${SBOM_CODE}, ${SBOM_CONTAINER}, cosign.pub, cosign.bundle, dependency-check-report.html, coverity-report/**/*", allowEmptyArchive: true
-            }
-        }
-    }
-
     post {
         always {
              dependencyCheckPublisher pattern: 'dependency-check-report.xml'
