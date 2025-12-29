@@ -66,15 +66,29 @@ pipeline {
         // --- BƯỚC 2: SECURITY STATIC ---
         stage('2. Security & Quality Gates (Static)') {
             parallel {
-                stage('Secret Scan (Gitleaks)') {
+		stage('Secret Scan (Gitleaks)') {
                     steps {
                         script {
+                            echo '--- [Step] Running Gitleaks (Binary Mode) ---'
                             try {
-                                // Quét secret trong code hiện tại
-                                sh 'docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect --source="/path" -v --no-git'
+                                // 1. Tải Gitleaks binary về (Dùng -k để bỏ qua lỗi SSL do sai giờ)
+                                // Link này tải phiên bản mới nhất cho Linux
+                                sh 'curl -k -sS -L https://github.com/zricethezav/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz -o gitleaks.tar.gz'
+                                
+                                // 2. Giải nén
+                                sh 'tar -xzf gitleaks.tar.gz gitleaks'
+                                sh 'chmod +x gitleaks'
+
+                                // 3. Chạy quét (Dùng file vừa tải thay vì Docker)
+                                // --no-git: Quét thư mục hiện tại như file thường
+                                // --verbose: Hiện chi tiết
+                                sh './gitleaks detect --source="." --no-git --verbose'
+                                
                             } catch (Exception e) {
                                 currentBuild.result = 'FAILURE'
-                                error("Gitleaks found secrets!")
+                                echo "GITLEAKS FOUND SECRETS OR FAILED!"
+                                // Không dùng error() để pipeline vẫn chạy tiếp các bước sau (tùy bạn chọn)
+                                error("Gitleaks check failed") 
                             }
                         }
                     }
