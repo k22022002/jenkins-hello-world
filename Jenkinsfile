@@ -91,20 +91,19 @@ pipeline {
             script {
                 echo '--- [Step] Synopsys Coverity SAST ---'
                 
-                // NÊN: Lấy version build từ biến môi trường Jenkins
+                // Cấu hình thông tin
                 def buildVer = "1.0.${env.BUILD_NUMBER}"
                 def covStream = "jenkins-hello-world-stream"
-                // Đường dẫn tool (Nếu chưa thể sửa Global Config thì tạm giữ, nhưng nên đưa ra environment)
                 def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
                 def covUrl = "http://192.168.12.190:8081"
 
-                // 1. Capture & Analyze (Giữ nguyên phần của bạn)
+                // 1. Capture & Analyze
                 sh "${covBin}/cov-configure --javascript || true"
                 sh "rm -rf idir"
                 sh "${covBin}/coverity capture --project-dir . --dir idir"
                 sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path \$(pwd)"
 
-                // 2. Commit Results (BỔ SUNG: version và description)
+                // 2. Commit Results
                 echo '--- Committing Results ---'
                 sh """
                     ${covBin}/cov-commit-defects --dir idir \
@@ -115,25 +114,27 @@ pipeline {
                     --description "Jenkins Build ${env.BUILD_NUMBER}"
                 """
 
-                // 3. [MỚI] Quality Gate - Kiểm tra lỗi cục bộ trước khi cho pass
-                // Xuất danh sách lỗi ra file text/json để kiểm tra
-                echo '--- Checking Quality Gate ---'
-                sh """
-                    ${covBin}/cov-format-errors --dir idir \
-                    --html-output coverity-report \
-                    --json-output-v7 coverity_results.json
-                """
+                // 3. [SỬA LỖI] Quality Gate & Reporting
+                echo '--- Generating Reports ---'
                 
-                // Đọc file JSON và fail build nếu có lỗi (Ví dụ đơn giản bằng grep hoặc jq)
-                // Ở đây dùng grep check file log output của cov-analyze hoặc check file json
-                // Cách đơn giản nhất cho CLI: Kiểm tra exit code hoặc dùng script parse JSON
-                 def defectCount = sh(script: "grep -c \"CID\" coverity_results.json || true", returnStdout: true).trim().toInteger()
-                 
-                 if (defectCount > 0) {
-                     // Bạn có thể uncomment dòng dưới để chặn build thật
-                     echo "CẢNH BÁO: Coverity phát hiện ${defectCount} vấn đề! Vui lòng kiểm tra Report."
-                     // error("Pipeline Failed: Coverity found ${defectCount} defects.") 
-                 }
+                // Lệnh 1: Tạo báo cáo HTML (để người dùng xem)
+                sh "${covBin}/cov-format-errors --dir idir --html-output coverity-report"
+
+                // Lệnh 2: Tạo báo cáo JSON (để máy đọc lỗi)
+                sh "${covBin}/cov-format-errors --dir idir --json-output-v7 coverity_results.json"
+
+                // 4. Kiểm tra số lượng lỗi
+                echo '--- Checking Quality Gate ---'
+                // Dùng jq để đếm chính xác số lỗi trong JSON
+                def defectCount = sh(script: "jq '.issues | length' coverity_results.json", returnStdout: true).trim().toInteger()
+                
+                echo "Coverity found: ${defectCount} defects"
+                
+                if (defectCount > 0) {
+                    echo "CẢNH BÁO: Coverity phát hiện ${defectCount} vấn đề! Vui lòng kiểm tra Report."
+                    // Uncomment dòng dưới nếu muốn chặn build khi có lỗi:
+                    // error("Pipeline Failed: Coverity found ${defectCount} defects.") 
+                }
             }
         }
     }
