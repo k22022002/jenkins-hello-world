@@ -20,7 +20,7 @@ COPY . .
 # Việc này đảm bảo node_modules được tạo ra là mới nhất, chuẩn Linux,
 # và KHÔNG BAO GIỜ bị code từ máy thật ghi đè lên nữa.
 # Dùng 'npm ci' tốt hơn 'npm install' cho CI/CD (nó cài chính xác theo package-lock.json)
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm config set strict-ssl false &&  npm install --omit=dev && npm cache clean --force
 
 # ----------------------------------
 
