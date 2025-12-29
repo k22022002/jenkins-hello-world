@@ -178,11 +178,20 @@ pipeline {
                         sh "docker build --no-cache -t ${DOCKER_IMAGE} ."
                          
                         // 3. Container Scanning (Trivy)
+			// 3. Container Scanning (Trivy - Binary Mode)
+                        echo '--- [Step] Installing Trivy (Binary) to bypass SSL ---'
+                        // Tải Trivy binary về (Dùng -k để bỏ qua lỗi SSL do sai giờ)
+                        sh 'rm -f trivy trivy.tar.gz' // Xóa cũ nếu có
+                        sh 'curl -k -L -sS https://github.com/aquasecurity/trivy/releases/download/v0.58.2/trivy_0.58.2_Linux-64bit.tar.gz -o trivy.tar.gz'
+                        sh 'tar -xzf trivy.tar.gz trivy'
+                        sh 'chmod +x trivy'
+
                         echo '--- Running Trivy Container Scan ---'
                         try {
+                           // Dùng ./trivy chạy trực tiếp, thêm --insecure để nó tải DB không check SSL
                            sh """
-                                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                                aquasec/trivy:latest image \
+                                ./trivy image \
+                                --insecure \
                                 --exit-code 1 \
                                 --severity HIGH,CRITICAL \
                                 --no-progress \
@@ -196,15 +205,12 @@ pipeline {
                         // 4. Generate CBOM
                         echo '--- Generating CBOM (Container SBOM) ---'
                         sh """
-                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                            -v \$(pwd):/output \
-                            aquasec/trivy:latest image \
+                            ./trivy image \
+                            --insecure \
                             --format cyclonedx \
-                            --output /output/${SBOM_CONTAINER} \
+                            --output ${SBOM_CONTAINER} \
                             ${DOCKER_IMAGE}
                         """
-                    } else {
-                        echo "WARNING: Dockerfile not found. Skipping Container steps."
                     }
                 }
             }
