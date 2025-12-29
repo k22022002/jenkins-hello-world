@@ -86,53 +86,58 @@ pipeline {
     }
 }                
 	stage('SAST (Coverity)') {
-                    steps {
-                        withCredentials([usernamePassword(credentialsId: 'coverity-credentials', usernameVariable: 'COV_USER', passwordVariable: 'COV_PASS')]) {
-                            script {
-                                echo '--- [Step] Synopsys Coverity SAST (Local) ---'
-                                
-                                // ĐƯỜNG DẪN CỦA BẠN
-                                def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
-                                def covUrl = "http://localhost:8081"
-                                def covStream = "jenkins-hello-world-stream" 
-                                
-                                // Kiểm tra kết nối
-                                try {
-                                    sh "curl -sI --connect-timeout 5 ${covUrl} > /dev/null"
-                                    echo "Kết nối Coverity Localhost OK!"
-                                } catch (Exception e) {
-                                    echo "Warning: Chưa kết nối được Coverity Server."
-                                }
+    steps {
+        withCredentials([usernamePassword(credentialsId: 'coverity-credentials', usernameVariable: 'COV_USER', passwordVariable: 'COV_PASS')]) {
+            script {
+                echo '--- [Step] Synopsys Coverity SAST ---'
+                
+                // NÊN: Lấy version build từ biến môi trường Jenkins
+                def buildVer = "1.0.${env.BUILD_NUMBER}"
+                def covStream = "jenkins-hello-world-stream"
+                // Đường dẫn tool (Nếu chưa thể sửa Global Config thì tạm giữ, nhưng nên đưa ra environment)
+                def covBin = "/home/ubuntu/cov-analysis-linux64-2025.9.2/bin" 
+                def covUrl = "http://192.168.12.190:8081"
 
-                                // 1. Configure (Vẫn giữ để đảm bảo cấu hình cho JS)
-                                // cov-configure vẫn tồn tại trong danh sách file [cite: 11]
-                                sh "${covBin}/cov-configure --javascript || true"
+                // 1. Capture & Analyze (Giữ nguyên phần của bạn)
+                sh "${covBin}/cov-configure --javascript || true"
+                sh "rm -rf idir"
+                sh "${covBin}/coverity capture --project-dir . --dir idir"
+                sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path \$(pwd)"
 
-                                // 2. Capture (DÙNG LỆNH MỚI 'coverity')
-                                sh "rm -rf idir" 
-                                
-                                // Sử dụng Coverity CLI  để tự động capture code NodeJS
-                                // --project-dir .: Thư mục chứa code (hiện tại)
-                                // --dir idir: Thư mục lưu kết quả capture (để bước sau dùng)
-                                sh "${covBin}/coverity capture --project-dir . --dir idir"
+                // 2. Commit Results (BỔ SUNG: version và description)
+                echo '--- Committing Results ---'
+                sh """
+                    ${covBin}/cov-commit-defects --dir idir \
+                    --url ${covUrl} \
+                    --stream ${covStream} \
+                    --user \$COV_USER --password \$COV_PASS \
+                    --version "${buildVer}" \
+                    --description "Jenkins Build ${env.BUILD_NUMBER}"
+                """
 
-                                // 3. Analyze (Vẫn dùng cov-analyze )
-                                echo '--- Running Analysis ---'
-                                sh "${covBin}/cov-analyze --dir idir --all --webapp-security --strip-path \$(pwd)"
-
-                                // 4. Commit (Vẫn dùng cov-commit-defects )
-                                echo '--- Committing Results ---'
-                                sh """
-                                    ${covBin}/cov-commit-defects --dir idir \
-                                    --url ${covUrl} \
-                                    --stream ${covStream} \
-                                    --user \$COV_USER --password \$COV_PASS
-                                """
-                            }
-                        }
-                    }
-                }
-	    }
+                // 3. [MỚI] Quality Gate - Kiểm tra lỗi cục bộ trước khi cho pass
+                // Xuất danh sách lỗi ra file text/json để kiểm tra
+                echo '--- Checking Quality Gate ---'
+                sh """
+                    ${covBin}/cov-format-errors --dir idir \
+                    --html-output coverity-report \
+                    --json-output-v7 coverity_results.json
+                """
+                
+                // Đọc file JSON và fail build nếu có lỗi (Ví dụ đơn giản bằng grep hoặc jq)
+                // Ở đây dùng grep check file log output của cov-analyze hoặc check file json
+                // Cách đơn giản nhất cho CLI: Kiểm tra exit code hoặc dùng script parse JSON
+                 def defectCount = sh(script: "grep -c \"CID\" coverity_results.json || true", returnStdout: true).trim().toInteger()
+                 
+                 if (defectCount > 0) {
+                     // Bạn có thể uncomment dòng dưới để chặn build thật
+                     echo "CẢNH BÁO: Coverity phát hiện ${defectCount} vấn đề! Vui lòng kiểm tra Report."
+                     // error("Pipeline Failed: Coverity found ${defectCount} defects.") 
+                 }
+            }
+        }
+    }
+}
 	}
         stage('3. Build & Container Security') {
             steps {
