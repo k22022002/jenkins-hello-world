@@ -1,6 +1,10 @@
 pipeline {
     agent any
-
+    // --- Cấu hình tự động chạy vào 2h sáng ---
+    triggers {
+        // H 2 * * * : Chạy ngẫu nhiên trong khoảng 2:00 - 2:59 sáng mỗi ngày
+        cron('H 2 * * *')
+    }
     environment {
         // --- Artifact Info ---
         ARTIFACT_NAME   = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
@@ -86,6 +90,15 @@ pipeline {
     }
 }                
 	stage('SAST (Coverity)') {
+    // --- [THÊM MỚI 2] Chỉ chạy Coverity khi được kích hoạt bởi Timer (2h sáng) ---
+    // Mục đích: Tiết kiệm thời gian build ban ngày. Ban đêm mới quét sâu.
+    when {
+        anyOf {
+            triggeredBy 'TimerTrigger'
+    // Bỏ comment dòng dưới nếu muốn chạy khi bấm nút "Build with Parameters" (nếu có)
+    // expression { return params.FORCE_COVERITY == true } 
+        }
+    }
     steps {
         withCredentials([usernamePassword(credentialsId: 'coverity-credentials', usernameVariable: 'COV_USER', passwordVariable: 'COV_PASS')]) {
             script {
