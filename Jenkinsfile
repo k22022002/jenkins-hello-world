@@ -5,6 +5,10 @@ pipeline {
         // H 2 * * * : Chạy ngẫu nhiên trong khoảng 2:00 - 2:59 sáng mỗi ngày
         cron('H 2 * * *')
     }
+    parameters {
+        // Mặc định là false (không tích) để build cho nhanh
+        booleanParam(name: 'FORCE_COVERITY', defaultValue: false, description: 'Tích vào đây nếu muốn chạy quét Coverity Full Scan')
+    }
     environment {
         // --- Artifact Info ---
         ARTIFACT_NAME   = "jenkins-hello-world-${BUILD_NUMBER}.tgz"
@@ -94,9 +98,8 @@ pipeline {
     // Mục đích: Tiết kiệm thời gian build ban ngày. Ban đêm mới quét sâu.
     when {
         anyOf {
-            triggeredBy 'TimerTrigger'
-    // Bỏ comment dòng dưới nếu muốn chạy khi bấm nút "Build with Parameters" (nếu có)
-    // expression { return params.FORCE_COVERITY == true } 
+            triggeredBy 'TimerTrigger' // Tự động chạy đêm
+            expression { return params.FORCE_COVERITY == true } // Chỉ chạy khi người dùng tích chọn
         }
     }
     steps {
