@@ -1,37 +1,37 @@
 # 1. Sử dụng image nhẹ (Alpine)
 FROM node:18-alpine
 
-# 2. [Bảo mật] Cài đặt dumb-init để xử lý tín hiệu hệ thống (PID 1) tốt hơn
-# Giúp container tắt mượt mà (graceful shutdown) khi deploy lại
-RUN sed -i 's/https/http/' /etc/apk/repositories &&  apk add --no-cache dumb-init
+# 2. Cài đặt dumb-init
+RUN sed -i 's/https/http/' /etc/apk/repositories && apk add --no-cache dumb-init
 
-# 3. Thiết lập biến môi trường mặc định (Có thể ghi đè từ Jenkins/K8s)
+# 3. Thiết lập biến môi trường
 ENV NODE_ENV=production
 ENV PORT=3000
 
 # 4. Thiết lập thư mục làm việc
 WORKDIR /app
 
-# 5. [Tối ưu Layer] Copy file dependency trước để tận dụng Docker Cache
-COPY package.json package-lock.json ./
+# --- SỬA ĐỔI QUAN TRỌNG TẠI ĐÂY ---
 
-# 6. Cài đặt dependency
-# --omit=dev: Giảm kích thước image
-# && npm cache clean --force: Xóa cache npm để giảm rác
-RUN npm install --omit=dev
-# 7. Copy source code
+# 5. Copy TOÀN BỘ source code vào trước (bao gồm package.json)
 COPY . .
 
-# 8. [Bảo mật Quan Trọng] Đổi quyền sở hữu file cho user 'node'
-# Mặc định container chạy root, rất nguy hiểm nếu bị hack.
-# Image node:alpine đã có sẵn user tên là 'node'.
+# 6. Cài đặt dependency SAU KHI copy code.
+# Việc này đảm bảo node_modules được tạo ra là mới nhất, chuẩn Linux,
+# và KHÔNG BAO GIỜ bị code từ máy thật ghi đè lên nữa.
+# Dùng 'npm ci' tốt hơn 'npm install' cho CI/CD (nó cài chính xác theo package-lock.json)
+RUN npm ci --omit=dev && npm cache clean --force
+
+# ----------------------------------
+
+# 7. Đổi quyền sở hữu file cho user 'node'
 RUN chown -R node:node /app
 
-# 9. [Bảo mật] Chuyển sang user thường (non-root)
+# 8. Chuyển sang user thường
 USER node
 
-# 10. Khai báo port sẽ dùng (Khớp với biến APP_PORT trong Jenkinsfile)
+# 9. Khai báo port
 EXPOSE 3000
 
-# 11. Chạy ứng dụng qua dumb-init
+# 10. Chạy ứng dụng
 CMD ["dumb-init", "node", "src/server.js"]

@@ -377,18 +377,17 @@ pipeline {
                     // QUAN TRỌNG: Thêm volume ẩn danh cho node_modules để tránh bị ghi đè bởi bind mount (nếu có)
                     // hoặc đơn giản là để bảo vệ thư viện trong container
                     sh """
-                        docker run -d \
-                        --restart unless-stopped \
-                        --name ${containerName} \
-                        -p ${APP_PORT}:${APP_PORT} \
-                        -v /app/node_modules \
-                        ${DOCKER_IMAGE}
-                    """ 
+                    docker run -d \
+                    --restart unless-stopped \
+                    --name jenkins-hello-world-prod \
+                    -p 3000:3000 \
+                    jenkins-hello-world:${BUILD_NUMBER}
+                    """
                     
                     // 3. Kiểm tra xem container đã lên chưa
                     sh "sleep 5" // Đợi 5s để app khởi động 
                     sh "docker ps | grep ${containerName}" 
-                    echo "Deploy SUCCESS! App is running at http://<JENKINS_AGENT_IP>:${APP_PORT}" 
+                    echo "Deploy SUCCESS! App is running at http://192.168.12.190:${APP_PORT}" 
                 }
             }
         }
